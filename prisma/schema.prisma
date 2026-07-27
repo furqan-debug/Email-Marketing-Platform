@@ -1,0 +1,55 @@
+generator client {
+  provider = "prisma-client"
+  output   = "./generated/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Workspace {
+  id        String     @id @default(uuid())
+  name      String
+  audiences Audience[]
+}
+
+model Audience {
+  id          String     @id @default(uuid())
+  name        String
+  workspaceId String
+  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+  contacts    Contact[]
+  campaigns   Campaign[]
+}
+
+model Contact {
+  id         String    @id @default(uuid())
+  email      String
+  audienceId String
+  audience   Audience  @relation(fields: [audienceId], references: [id])
+  messages   Message[]
+}
+
+model Campaign {
+  id         String    @id @default(uuid())
+  name       String
+  audienceId String
+  audience   Audience  @relation(fields: [audienceId], references: [id])
+  messages   Message[]
+}
+
+model Message {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id])
+  contactId  String
+  contact    Contact  @relation(fields: [contactId], references: [id])
+  events     Event[]
+}
+
+model Event {
+  id        String   @id @default(uuid())
+  type      String
+  messageId String
+  message   Message  @relation(fields: [messageId], references: [id])
+}
