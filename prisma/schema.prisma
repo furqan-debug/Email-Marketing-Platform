@@ -1,6 +1,7 @@
 generator client {
-  provider = "prisma-client"
-  output   = "./generated/client"
+  provider     = "prisma-client"
+  output       = "./generated/client"
+  moduleFormat = "cjs"
 }
 
 datasource db {
@@ -48,8 +49,10 @@ model Message {
 }
 
 model Event {
-  id        String   @id @default(uuid())
-  type      String
-  messageId String
-  message   Message  @relation(fields: [messageId], references: [id])
+  id          String   @id @default(uuid())
+  type        String
+  messageId   String
+  message     Message  @relation(fields: [messageId], references: [id])
+  rawPayload  Json
+  occurredAt  DateTime @default(now())
 }
