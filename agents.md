@@ -26,4 +26,6 @@
   (`EmailProvider`), so the fake adapter and real SES adapter are interchangeable.
 
 ## Current build stage
-We are in Phase 1 — Fake Email Send. Real SES/SNS/S3 do not exist yet. Do not add them.
+Phase 3 complete — verified end-to-end: Message created → enqueued → sent via
+SES → SNS event → webhook → Event row written, correctly linked by messageId.
+Confirmed via test:pipeline script. Production access granted (50k/day, 14/sec).
