@@ -40,12 +40,13 @@ model Campaign {
 }
 
 model Message {
-  id         String   @id @default(uuid())
-  campaignId String
-  campaign   Campaign @relation(fields: [campaignId], references: [id])
-  contactId  String
-  contact    Contact  @relation(fields: [contactId], references: [id])
-  events     Event[]
+  id            String   @id @default(uuid())
+  campaignId    String
+  campaign      Campaign @relation(fields: [campaignId], references: [id])
+  contactId     String
+  contact       Contact  @relation(fields: [contactId], references: [id])
+  trackingToken String?  @unique
+  events        Event[]
 }
 
 model Event {
@@ -54,5 +55,6 @@ model Event {
   messageId   String
   message     Message  @relation(fields: [messageId], references: [id])
   rawPayload  Json
+  country     String?
   occurredAt  DateTime @default(now())
 }
