@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { BullModule } from '@nestjs/bullmq';
 import { EmailModule } from './email/email.module';
 import { WebhooksModule } from './webhooks/webhooks.module';
+import { TrackingModule } from './tracking/tracking.module';
 @Module({
   imports: [
     BullModule.forRoot({
@@ -14,6 +15,7 @@ import { WebhooksModule } from './webhooks/webhooks.module';
     }),
     EmailModule,
     WebhooksModule,
+    TrackingModule,
   ],
   controllers: [AppController],
   providers: [AppService],
