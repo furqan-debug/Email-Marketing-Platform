@@ -9,9 +9,10 @@ datasource db {
 }
 
 model Workspace {
-  id        String     @id @default(uuid())
-  name      String
-  audiences Audience[]
+  id           String        @id @default(uuid())
+  name         String
+  audiences    Audience[]
+  suppressions Suppression[]
 }
 
 model Audience {
@@ -29,6 +30,8 @@ model Contact {
   audienceId String
   audience   Audience  @relation(fields: [audienceId], references: [id])
   messages   Message[]
+
+  @@unique([audienceId, email])
 }
 
 model Campaign {
@@ -57,4 +60,14 @@ model Event {
   rawPayload  Json
   country     String?
   occurredAt  DateTime @default(now())
+}
+
+model Suppression {
+  id          String    @id @default(uuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id])
+  email       String
+  createdAt   DateTime  @default(now())
+
+  @@unique([workspaceId, email])
 }
