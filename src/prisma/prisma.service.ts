@@ -34,10 +34,11 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Model proxies — add more as new models are used across the app
-  get workspace() { return (this.client as any).workspace; }
-  get audience()  { return (this.client as any).audience; }
-  get contact()   { return (this.client as any).contact; }
-  get campaign()  { return (this.client as any).campaign; }
-  get message()   { return (this.client as any).message; }
-  get event()     { return (this.client as any).event; }
+  get workspace()   { return (this.client as any).workspace; }
+  get audience()    { return (this.client as any).audience; }
+  get contact()     { return (this.client as any).contact; }
+  get campaign()    { return (this.client as any).campaign; }
+  get message()     { return (this.client as any).message; }
+  get event()       { return (this.client as any).event; }
+  get suppression() { return (this.client as any).suppression; }
 }
