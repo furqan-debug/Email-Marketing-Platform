@@ -2,6 +2,7 @@ import {
   Controller,
   Post,
   Delete,
+  Get,
   Query,
   Body,
   UploadedFile,
@@ -11,6 +12,7 @@ import {
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ContactsService, ImportResult } from './contacts.service';
+import { PrismaService } from '../prisma/prisma.service';
 
 interface SuppressDto {
   workspaceId: string;
@@ -21,7 +23,23 @@ interface SuppressDto {
 export class ContactsController {
   private readonly logger = new Logger(ContactsController.name);
 
-  constructor(private readonly contactsService: ContactsService) {}
+  constructor(
+    private readonly contactsService: ContactsService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * GET /contacts/audiences?workspaceId=<uuid>
+   * Returns all audiences for a workspace (or all if no workspaceId given).
+   */
+  @Get('audiences')
+  listAudiences(@Query('workspaceId') workspaceId?: string) {
+    return this.prisma.audience.findMany({
+      where: workspaceId ? { workspaceId } : undefined,
+      select: { id: true, name: true, workspaceId: true },
+      orderBy: { name: 'asc' },
+    });
+  }
 
   /**
    * POST /contacts/import?audienceId=<uuid>

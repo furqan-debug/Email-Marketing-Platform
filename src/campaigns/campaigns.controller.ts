@@ -1,4 +1,5 @@
-import { Controller, HttpCode, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
 import {
   CampaignMessagesService,
   CampaignStatusResult,
@@ -7,7 +8,50 @@ import {
 
 @Controller('campaigns')
 export class CampaignsController {
-  constructor(private readonly campaignMessages: CampaignMessagesService) {}
+  constructor(
+    private readonly campaignMessages: CampaignMessagesService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  /**
+   * GET /campaigns
+   * Returns all campaigns (id, name, status, audienceId).
+   */
+  @Get()
+  listCampaigns() {
+    return this.prisma.campaign.findMany({
+      select: { id: true, name: true, status: true, audienceId: true },
+      orderBy: { id: 'desc' },
+    });
+  }
+
+  /**
+   * GET /campaigns/:id
+   * Returns a single campaign with its snapshot.
+   */
+  @Get(':id')
+  async getCampaign(@Param('id') id: string) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      include: { snapshot: true },
+    });
+    if (!campaign) throw new NotFoundException(`Campaign ${id} not found`);
+    return campaign;
+  }
+
+  /**
+   * POST /campaigns
+   * Body: { name, audienceId, templateId? }
+   * Creates a new campaign in DRAFT status.
+   */
+  @Post()
+  @HttpCode(201)
+  createCampaign(@Body() body: { name: string; audienceId: string; templateId?: string }) {
+    return this.prisma.campaign.create({
+      data: { name: body.name, audienceId: body.audienceId },
+    });
+  }
+
 
   /**
    * POST /campaigns/:id/generate-messages

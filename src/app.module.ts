@@ -10,6 +10,7 @@ import { ContactsModule } from './contacts/contacts.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WorkflowsModule } from './workflows/workflows.module';
+import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
     CampaignsModule,
     AnalyticsModule,
     WorkflowsModule,
+    PrismaModule,
   ],
   controllers: [AppController],
   providers: [AppService],
