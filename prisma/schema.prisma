@@ -37,12 +37,13 @@ generator client {
  }
 
  model Campaign {
-   id         String    @id @default(uuid())
+   id         String             @id @default(uuid())
    name       String
-   status     String    @default("DRAFT")
+   status     String             @default("DRAFT")
    audienceId String
-   audience   Audience  @relation(fields: [audienceId], references: [id])
+   audience   Audience           @relation(fields: [audienceId], references: [id])
    messages   Message[]
+   snapshot   AnalyticsSnapshot?
  }
 
  model Message {
@@ -79,8 +80,21 @@ generator client {
  }
 
  model Template {
-   id      String @id @default(uuid())
+   id      String  @id @default(uuid())
    name    String
    subject String?
    html    String
+ }
+
+ model AnalyticsSnapshot {
+   id         String   @id @default(uuid())
+   campaignId String   @unique
+   campaign   Campaign @relation(fields: [campaignId], references: [id])
+   sent       Int      @default(0)
+   delivered  Int      @default(0)
+   opened     Int      @default(0)
+   clicked    Int      @default(0)
+   bounced    Int      @default(0)
+   complained Int      @default(0)
+   computedAt DateTime @default(now())
  }
