@@ -25,14 +25,15 @@ generator client {
  }
 
  model Contact {
-   id         String    @id @default(uuid())
-   email      String
-   firstName  String?
-   lastName   String?
-   audienceId String
-   audience   Audience  @relation(fields: [audienceId], references: [id])
-   messages   Message[]
- 
+   id                 String              @id @default(uuid())
+   email              String
+   firstName          String?
+   lastName           String?
+   audienceId         String
+   audience           Audience            @relation(fields: [audienceId], references: [id])
+   messages           Message[]
+   workflowExecutions WorkflowExecution[]
+
    @@unique([audienceId, email])
  }
 
@@ -98,3 +99,15 @@ generator client {
    complained Int      @default(0)
    computedAt DateTime @default(now())
  }
+
+ model WorkflowExecution {
+   id           String   @id @default(uuid())
+   workflowType String   @default("WELCOME_SERIES")
+   contactId    String
+   contact      Contact  @relation(fields: [contactId], references: [id])
+   status       String   @default("RUNNING") // RUNNING, COMPLETED, CANCELLED
+   currentStep  Int      @default(1)
+   createdAt    DateTime @default(now())
+   updatedAt    DateTime @updatedAt
+ }
+
