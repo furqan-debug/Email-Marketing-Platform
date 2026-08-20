@@ -11,37 +11,20 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { PrismaModule } from './prisma/prisma.module';
+import IORedis from 'ioredis';
 
 @Module({
   imports: [
     BullModule.forRootAsync({
       useFactory: () => {
         const redisUrl = process.env.REDIS_URL;
-        if (redisUrl) {
-          try {
-            const parsed = new URL(redisUrl);
-            // Upstash uses rediss:// (TLS). Detect and enable tls option.
-            const isTls = parsed.protocol === 'rediss:';
-            return {
-              connection: {
-                host: parsed.hostname,
-                port: parseInt(parsed.port || (isTls ? '6380' : '6379'), 10),
-                username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
-                password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
-                tls: isTls ? {} : undefined,
-              },
-            };
-          } catch {
-            // Fallback if URL parsing fails
-          }
-        }
-        return {
-          connection: {
-            host: process.env.REDIS_HOST || 'localhost',
-            port: parseInt(process.env.REDIS_PORT || '6379', 10),
-            password: process.env.REDIS_PASSWORD || undefined,
-          },
-        };
+        const isTls = redisUrl?.startsWith('rediss://');
+        const connection = new IORedis(redisUrl || 'redis://localhost:6379', {
+          maxRetriesPerRequest: null, // Required by BullMQ
+          tls: isTls ? { rejectUnauthorized: false } : undefined,
+          enableTLSForSentinelMode: false,
+        });
+        return { connection };
       },
     }),
     // ScheduleModule.forRoot() must be registered once at the root level
