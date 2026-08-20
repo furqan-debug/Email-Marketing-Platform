@@ -20,12 +20,15 @@ import { PrismaModule } from './prisma/prisma.module';
         if (redisUrl) {
           try {
             const parsed = new URL(redisUrl);
+            // Upstash uses rediss:// (TLS). Detect and enable tls option.
+            const isTls = parsed.protocol === 'rediss:';
             return {
               connection: {
                 host: parsed.hostname,
-                port: parseInt(parsed.port || '6379', 10),
+                port: parseInt(parsed.port || (isTls ? '6380' : '6379'), 10),
                 username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
                 password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+                tls: isTls ? {} : undefined,
               },
             };
           } catch {
