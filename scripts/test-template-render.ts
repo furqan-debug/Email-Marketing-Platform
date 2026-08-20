@@ -1,5 +1,5 @@
 import { TemplateService } from '../src/templates/template.service';
-import { Contact, Template } from '@prisma/client';
+import type { ContactModel, TemplateModel } from '../prisma/generated/client/models';
 
 async function run() {
   console.log('🧪 Testing TemplateService.render()...\n');
@@ -8,7 +8,7 @@ async function run() {
   const templateService = new TemplateService(null as any);
 
   // Mock template
-  const mockTemplate: Template = {
+  const mockTemplate: TemplateModel = {
     id: 'tpl-123',
     name: 'Welcome Template',
     subject: 'Welcome, {{first_name}}!',
@@ -22,7 +22,7 @@ async function run() {
   };
 
   // Mock contact
-  const mockContact: Contact = {
+  const mockContact: ContactModel = {
     id: 'ct-456',
     email: 'ALICE@EXAMPLE.COM',
     firstName: 'Alice',
