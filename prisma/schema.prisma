@@ -4,70 +4,83 @@ generator client {
   moduleFormat = "cjs"
 }
 
-datasource db {
-  provider = "postgresql"
-}
+ datasource db {
+   provider = "postgresql"
+ }
 
-model Workspace {
-  id           String        @id @default(uuid())
-  name         String
-  audiences    Audience[]
-  suppressions Suppression[]
-}
+ model Workspace {
+   id           String        @id @default(uuid())
+   name         String
+   audiences    Audience[]
+   suppressions Suppression[]
+ }
 
-model Audience {
-  id          String     @id @default(uuid())
-  name        String
-  workspaceId String
-  workspace   Workspace  @relation(fields: [workspaceId], references: [id])
-  contacts    Contact[]
-  campaigns   Campaign[]
-}
+ model Audience {
+   id          String     @id @default(uuid())
+   name        String
+   workspaceId String
+   workspace   Workspace  @relation(fields: [workspaceId], references: [id])
+   contacts    Contact[]
+   campaigns   Campaign[]
+ }
 
-model Contact {
-  id         String    @id @default(uuid())
-  email      String
-  audienceId String
-  audience   Audience  @relation(fields: [audienceId], references: [id])
-  messages   Message[]
+ model Contact {
+   id         String    @id @default(uuid())
+   email      String
+   firstName  String?
+   lastName   String?
+   audienceId String
+   audience   Audience  @relation(fields: [audienceId], references: [id])
+   messages   Message[]
+ 
+   @@unique([audienceId, email])
+ }
 
-  @@unique([audienceId, email])
-}
+ model Campaign {
+   id         String    @id @default(uuid())
+   name       String
+   status     String    @default("DRAFT")
+   audienceId String
+   audience   Audience  @relation(fields: [audienceId], references: [id])
+   messages   Message[]
+ }
 
-model Campaign {
-  id         String    @id @default(uuid())
-  name       String
-  audienceId String
-  audience   Audience  @relation(fields: [audienceId], references: [id])
-  messages   Message[]
-}
+ model Message {
+   id            String    @id @default(uuid())
+   campaignId    String
+   campaign      Campaign  @relation(fields: [campaignId], references: [id])
+   contactId     String
+   contact       Contact   @relation(fields: [contactId], references: [id])
+   trackingToken String?   @unique
+   enqueuedAt    DateTime?
+   events        Event[]
 
-model Message {
-  id            String   @id @default(uuid())
-  campaignId    String
-  campaign      Campaign @relation(fields: [campaignId], references: [id])
-  contactId     String
-  contact       Contact  @relation(fields: [contactId], references: [id])
-  trackingToken String?  @unique
-  events        Event[]
-}
+   @@unique([campaignId, contactId])
+ }
 
-model Event {
-  id          String   @id @default(uuid())
-  type        String
-  messageId   String
-  message     Message  @relation(fields: [messageId], references: [id])
-  rawPayload  Json
-  country     String?
-  occurredAt  DateTime @default(now())
-}
+ model Event {
+   id          String   @id @default(uuid())
+   type        String
+   messageId   String
+   message     Message  @relation(fields: [messageId], references: [id])
+   rawPayload  Json
+   country     String?
+   occurredAt  DateTime @default(now())
+ }
 
-model Suppression {
-  id          String    @id @default(uuid())
-  workspaceId String
-  workspace   Workspace @relation(fields: [workspaceId], references: [id])
-  email       String
-  createdAt   DateTime  @default(now())
+ model Suppression {
+   id          String    @id @default(uuid())
+   workspaceId String
+   workspace   Workspace @relation(fields: [workspaceId], references: [id])
+   email       String
+   createdAt   DateTime  @default(now())
+ 
+   @@unique([workspaceId, email])
+ }
 
-  @@unique([workspaceId, email])
-}
+ model Template {
+   id      String @id @default(uuid())
+   name    String
+   subject String?
+   html    String
+ }
