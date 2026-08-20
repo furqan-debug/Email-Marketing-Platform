@@ -12,6 +12,6 @@ async function bootstrap() {
   const bodyParser = require('body-parser');
   app.use(bodyParser.json({ type: ['application/json', 'text/plain'] }));
 
-  await app.listen(process.env.PORT ?? 3000);
+  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
 }
 bootstrap();

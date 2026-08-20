@@ -13,10 +13,31 @@ import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
   imports: [
-    BullModule.forRoot({
-      connection: {
-        host: 'localhost',
-        port: 6379,
+    BullModule.forRootAsync({
+      useFactory: () => {
+        const redisUrl = process.env.REDIS_URL;
+        if (redisUrl) {
+          try {
+            const parsed = new URL(redisUrl);
+            return {
+              connection: {
+                host: parsed.hostname,
+                port: parseInt(parsed.port || '6379', 10),
+                username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+                password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+              },
+            };
+          } catch {
+            // Fallback if URL parsing fails
+          }
+        }
+        return {
+          connection: {
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379', 10),
+            password: process.env.REDIS_PASSWORD || undefined,
+          },
+        };
       },
     }),
     // ScheduleModule.forRoot() must be registered once at the root level
