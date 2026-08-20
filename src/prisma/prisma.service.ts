@@ -23,8 +23,15 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       process.env.DATABASE_PUBLIC_URL ||
       process.env.DATABASE_PRIVATE_URL;
 
+    // AWS RDS (and most remote databases) require SSL.
+    // Disable SSL only for localhost / 127.0.0.1 (local dev).
+    const isLocal =
+      connectionString?.includes('localhost') ||
+      connectionString?.includes('127.0.0.1');
+
     this.pool = new Pool({
       connectionString,
+      ssl: isLocal ? undefined : { rejectUnauthorized: false },
     });
     const adapter = new PrismaPg(this.pool);
     this.client = new PrismaClient({ adapter } as ConstructorParameters<typeof PrismaClient>[0]);
