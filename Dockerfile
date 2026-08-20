@@ -1,37 +1,27 @@
-# Stage 1: Build stage
-FROM node:20-alpine AS builder
+FROM node:20-alpine
 
 WORKDIR /app
 
-# Copy package files and Prisma schema
+# Copy package files and Prisma configuration
 COPY package*.json ./
+COPY prisma.config.ts ./
 COPY prisma ./prisma/
 
-# Install dependencies
+# Install all dependencies (including devDependencies required for build)
 RUN npm ci
 
-# Copy full application source
+# Copy application source code
 COPY . .
 
 # Generate Prisma Client (Prisma v7) and compile NestJS app
 RUN npx prisma generate
 RUN npm run build
 
-# Stage 2: Production stage
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
+# Set production environment
 ENV NODE_ENV=production
 
-# Copy package files, node_modules, compiled dist, and prisma files
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/prisma ./prisma
-
-# Expose port (defaults to 3000, Railway will override via PORT env)
+# Expose port (Railway overrides via PORT env)
 EXPOSE 3000
 
-# Run database migrations and start NestJS production server
+# Run database migrations and start production server
 CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
