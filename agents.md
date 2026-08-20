@@ -26,6 +26,8 @@
   (`EmailProvider`), so the fake adapter and real SES adapter are interchangeable.
 
 ## Current build stage
-Phase 3 complete — verified end-to-end: Message created → enqueued → sent via
-SES → SNS event → webhook → Event row written, correctly linked by messageId.
-Confirmed via test:pipeline script. Production access granted (50k/day, 14/sec).
+Phase 9 complete — Welcome Series workflow engine built with mid-workflow
+suppression enforcement. Verified via named unit test
+(workflows.service.spec.ts) proving unsubscribe after Step 1 halts Step 2/3.
+Delay implemented via BullMQ delayed jobs (testable with short delays, not
+hardcoded to real wall-clock time).
