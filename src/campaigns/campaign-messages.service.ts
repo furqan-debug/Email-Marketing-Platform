@@ -1,12 +1,14 @@
 import {
   ConflictException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
+import { EMAIL_PROVIDER } from '../email/email.provider';
+import type { EmailProvider } from '../email/email.provider';
+import { TrackingService } from '../tracking/tracking.service';
 
 // ── Campaign status constants ─────────────────────────────────────────────────
 export const CampaignStatus = {
@@ -37,7 +39,8 @@ export class CampaignMessagesService {
 
   constructor(
     private readonly prisma: PrismaService,
-    @InjectQueue('email') private readonly emailQueue: Queue,
+    @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
+    private readonly trackingService: TrackingService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -211,19 +214,44 @@ export class CampaignMessagesService {
         continue;
       }
 
-      // ── Enqueue to BullMQ ─────────────────────────────────────────────────
-      await this.emailQueue.add('send', {
-        to: email,
-        subject: campaign.name,
-        html: `<p>Campaign: ${campaign.name}</p>`,
-        messageId: message.id,
-      });
+      // ── Send directly via email provider (no BullMQ needed) ──────────────
+      let html = `<p>Campaign: ${campaign.name}</p>`;
+      const msgId = message.id;
 
-      // ── Mark as enqueued in DB ────────────────────────────────────────────
+      // Inject tracking pixel + wrap links (mirrors EmailWorker logic)
+      try {
+        const token = this.trackingService.generateToken(msgId);
+        await this.trackingService.saveToken(msgId, token);
+        const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
+        html = this.trackingService.wrapHtml(html, token, baseUrl);
+      } catch (trackErr: any) {
+        this.logger.warn(`Tracking setup failed (continuing): ${trackErr?.message ?? trackErr}`);
+      }
+
+      const result = await this.emailProvider.send({
+        to: email as string,
+        subject: campaign.name,
+        html,
+      });
+      this.logger.log(`Sent message ${msgId} to ${email} — providerId: ${result.providerId}`);
+
+      // Update Message with SES MessageId + mark enqueued
       await this.prisma.message.update({
-        where: { id: message.id },
+        where: { id: msgId },
         data: { enqueuedAt: new Date() },
       });
+
+      // Try to update Message.id to SES's providerId (best-effort)
+      if (result.providerId && result.providerId !== msgId) {
+        try {
+          await this.prisma.message.update({
+            where: { id: msgId },
+            data: { id: result.providerId },
+          });
+        } catch (idErr: any) {
+          this.logger.warn(`Could not update Message ID to providerId: ${idErr?.message}`);
+        }
+      }
 
       enqueued++;
     }
