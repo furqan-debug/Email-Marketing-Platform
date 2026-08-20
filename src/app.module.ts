@@ -9,6 +9,7 @@ import { TrackingModule } from './tracking/tracking.module';
 import { ContactsModule } from './contacts/contacts.module';
 import { CampaignsModule } from './campaigns/campaigns.module';
 import { AnalyticsModule } from './analytics/analytics.module';
+import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
   imports: [
@@ -27,6 +28,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
     ContactsModule,
     CampaignsModule,
     AnalyticsModule,
+    WorkflowsModule,
   ],
   controllers: [AppController],
   providers: [AppService],
