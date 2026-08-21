@@ -23,5 +23,5 @@ ENV NODE_ENV=production
 # Expose port (Railway overrides via PORT env)
 EXPOSE 3000
 
-# Run database migrations and start production server
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+# Run production server
+CMD ["node", "dist/src/main.js"]

@@ -24,31 +24,36 @@ class AllExceptionsLogger implements ExceptionFilter {
 }
 
 async function bootstrap() {
-  // Disable the default body parser so we can configure it manually.
-  // SNS sends Content-Type: text/plain but the body is valid JSON,
-  // so we tell the JSON parser to accept both content types.
-  const app = await NestFactory.create(AppModule, { bodyParser: false });
+  try {
+    // Disable the default body parser so we can configure it manually.
+    // SNS sends Content-Type: text/plain but the body is valid JSON,
+    // so we tell the JSON parser to accept both content types.
+    const app = await NestFactory.create(AppModule, { bodyParser: false });
 
-  // Enable CORS so the Vercel frontend can call this API
-  app.enableCors({
-    origin: (origin, callback) => {
-      // Allow all origins or requests without origin (e.g. server-to-server/curl)
-      callback(null, true);
-    },
-    credentials: true,
-    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'Origin'],
-    preflightContinue: false,
-    optionsSuccessStatus: 204,
-  });
+    // Enable CORS so the Vercel frontend can call this API
+    app.enableCors({
+      origin: true,
+      credentials: true,
+      methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'Origin'],
+      preflightContinue: false,
+      optionsSuccessStatus: 204,
+    });
 
-  // Global exception filter — logs real errors to stdout (visible in Railway)
-  app.useGlobalFilters(new AllExceptionsLogger());
+    // Global exception filter — logs real errors to stdout (visible in Railway)
+    app.useGlobalFilters(new AllExceptionsLogger());
 
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const bodyParser = require('body-parser');
-  app.use(bodyParser.json({ type: ['application/json', 'text/plain'] }));
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const bodyParser = require('body-parser');
+    app.use(bodyParser.json({ type: ['application/json', 'text/plain'] }));
 
-  await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
+    const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
+    console.log(`[BOOT] Starting server on 0.0.0.0:${port}...`);
+    await app.listen(port, '0.0.0.0');
+    console.log(`[BOOT] Server successfully listening on 0.0.0.0:${port}`);
+  } catch (err) {
+    console.error('[FATAL BOOT ERROR]:', err);
+    process.exit(1);
+  }
 }
 bootstrap();
