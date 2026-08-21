@@ -1,4 +1,4 @@
-﻿-- Migration: add_campaign_content_and_unique_analytics
+-- Migration: add_campaign_content_and_unique_analytics
 
 -- Campaign: add email content fields
 ALTER TABLE "Campaign"
