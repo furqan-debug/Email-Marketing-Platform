@@ -33,6 +33,8 @@ export interface CampaignStatusResult {
   status: string;
 }
 
+import { AnalyticsService } from '../analytics/analytics.service';
+
 @Injectable()
 export class CampaignMessagesService {
   private readonly logger = new Logger(CampaignMessagesService.name);
@@ -41,6 +43,7 @@ export class CampaignMessagesService {
     private readonly prisma: PrismaService,
     @Inject(EMAIL_PROVIDER) private readonly emailProvider: EmailProvider,
     private readonly trackingService: TrackingService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -292,7 +295,7 @@ export class CampaignMessagesService {
 
       const result = await this.emailProvider.send({
         to: contact.email as string,
-        subject: emailSubject,
+        subject: personalSubject,
         html,
       });
       this.logger.log(`Sent message ${msgId} to ${contact.email} — providerId: ${result.providerId}`);
@@ -323,6 +326,13 @@ export class CampaignMessagesService {
       where: { id: campaignId },
       data: { status: CampaignStatus.COMPLETED },
     });
+
+    // Auto-compute fresh analytics snapshot immediately
+    try {
+      await this.analyticsService.computeForCampaign(campaignId);
+    } catch (computeErr: any) {
+      this.logger.warn(`Could not compute initial snapshot for campaign ${campaignId}: ${computeErr?.message}`);
+    }
 
     this.logger.log(`Campaign ${campaignId}: dispatch complete — enqueued=${enqueued}`);
   }
