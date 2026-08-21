@@ -64,7 +64,7 @@ export class ContactsController {
     const [data, total] = await Promise.all([
       this.prisma.contact.findMany({
         where: { audienceId },
-        select: { id: true, email: true, firstName: true, lastName: true },
+        select: { id: true, email: true, firstName: true, lastName: true, attributes: true },
         orderBy: { email: 'asc' },
         skip,
         take: limit,
@@ -77,7 +77,7 @@ export class ContactsController {
 
   /**
    * POST /contacts/import?audienceId=<uuid>
-   * Accepts multipart/form-data with a CSV file under the field name "file".
+   * Accepts multipart/form-data with a CSV file under "file", and optional "mapping" field.
    * Returns { imported, skipped, errors, errorDetails }.
    */
   @Post('import')
@@ -85,6 +85,8 @@ export class ContactsController {
   async importCsv(
     @Query('audienceId') audienceId: string,
     @UploadedFile() file: Express.Multer.File,
+    @Body('mapping') mappingRaw?: string,
+    @Query('mapping') mappingQuery?: string,
   ): Promise<ImportResult> {
     if (!audienceId) {
       throw new BadRequestException('audienceId query parameter is required');
@@ -96,11 +98,21 @@ export class ContactsController {
       throw new BadRequestException('Uploaded file must be a CSV');
     }
 
+    let mappingParsed: any = undefined;
+    const mappingToParse = mappingRaw || mappingQuery;
+    if (mappingToParse) {
+      try {
+        mappingParsed = typeof mappingToParse === 'string' ? JSON.parse(mappingToParse) : mappingToParse;
+      } catch {
+        this.logger.warn(`Could not parse CSV mapping JSON: ${mappingToParse}`);
+      }
+    }
+
     this.logger.log(
       `CSV import request: audienceId=${audienceId} filename=${file.originalname} size=${file.size}`,
     );
 
-    return this.contactsService.importCsv(audienceId, file.buffer);
+    return this.contactsService.importCsv(audienceId, file.buffer, mappingParsed);
   }
 
   /**

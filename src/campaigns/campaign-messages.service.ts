@@ -154,7 +154,7 @@ export class CampaignMessagesService {
       where: { id: campaignId },
       include: {
         audience: {
-          include: { contacts: { select: { id: true, email: true, firstName: true, lastName: true } } },
+          include: { contacts: { select: { id: true, email: true, firstName: true, lastName: true, attributes: true } } },
         },
         template: { select: { html: true, subject: true } },
       },
@@ -182,7 +182,13 @@ export class CampaignMessagesService {
       || campaign.name;
 
     // Build a contactId → contact map for rendering
-    type ContactEntry = { id: string; email: string; firstName: string | null; lastName: string | null };
+    type ContactEntry = {
+      id: string;
+      email: string;
+      firstName: string | null;
+      lastName: string | null;
+      attributes?: Record<string, any> | null;
+    };
     const contactMap = new Map<string, ContactEntry>(
       campaign.audience.contacts.map((c) => [c.id, c as ContactEntry]),
     );
@@ -207,6 +213,26 @@ export class CampaignMessagesService {
     );
 
     let enqueued = 0;
+
+    // Helper for rendering custom placeholders
+    const renderMergeTags = (templateText: string, contact: ContactEntry): string => {
+      return templateText.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => {
+        const lowerKey = key.toLowerCase();
+        if (lowerKey === 'first_name' || lowerKey === 'firstname') return contact.firstName ?? '';
+        if (lowerKey === 'last_name' || lowerKey === 'lastname') return contact.lastName ?? '';
+        if (lowerKey === 'email') return contact.email;
+
+        if (contact.attributes && typeof contact.attributes === 'object') {
+          const attrs = contact.attributes as Record<string, any>;
+          if (attrs[key] !== undefined && attrs[key] !== null) return String(attrs[key]);
+          if (attrs[lowerKey] !== undefined && attrs[lowerKey] !== null) return String(attrs[lowerKey]);
+          const noUnder = lowerKey.replace(/_/g, '');
+          const foundKey = Object.keys(attrs).find(k => k.toLowerCase().replace(/_/g, '') === noUnder);
+          if (foundKey && attrs[foundKey] !== undefined && attrs[foundKey] !== null) return String(attrs[foundKey]);
+        }
+        return '';
+      });
+    };
 
     for (const message of pendingMessages) {
       // ── Re-read status from DB on every iteration ─────────────────────────
@@ -234,19 +260,13 @@ export class CampaignMessagesService {
         continue;
       }
 
-      // ── Render per-contact HTML ───────────────────────────────────────────
+      // ── Render per-contact HTML & Subject ──────────────────────────────────
       const msgId   = message.id;
       const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 
-      // 1. Substitute {{first_name}} / {{last_name}} / {{email}} placeholders
-      let html = baseHtml.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => {
-        switch (key.toLowerCase()) {
-          case 'first_name': return contact.firstName ?? '';
-          case 'last_name':  return contact.lastName  ?? '';
-          case 'email':      return contact.email;
-          default:           return '';
-        }
-      });
+      // 1. Substitute placeholders (standard + custom attributes)
+      let html = renderMergeTags(baseHtml, contact);
+      const personalSubject = renderMergeTags(emailSubject, contact);
 
       // 2. Append unsubscribe footer (before tracking wrap)
       const unsubToken  = this.trackingService.generateToken(msgId);

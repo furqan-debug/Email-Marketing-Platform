@@ -25,17 +25,18 @@ generator client {
  }
 
  model Contact {
-   id                 String              @id @default(uuid())
-   email              String
-   firstName          String?
-   lastName           String?
-   audienceId         String
-   audience           Audience            @relation(fields: [audienceId], references: [id])
-   messages           Message[]
-   workflowExecutions WorkflowExecution[]
+  id                 String              @id @default(uuid())
+  email              String
+  firstName          String?
+  lastName           String?
+  attributes         Json?               // arbitrary custom key-value attributes from CSV
+  audienceId         String
+  audience           Audience            @relation(fields: [audienceId], references: [id])
+  messages           Message[]
+  workflowExecutions WorkflowExecution[]
 
-   @@unique([audienceId, email])
- }
+  @@unique([audienceId, email])
+}
 
  model Campaign {
    id         String             @id @default(uuid())

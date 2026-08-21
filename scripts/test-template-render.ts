@@ -27,6 +27,7 @@ async function run() {
     email: 'ALICE@EXAMPLE.COM',
     firstName: 'Alice',
     lastName: 'Smith',
+    attributes: null,
     audienceId: 'aud-789',
   };
 

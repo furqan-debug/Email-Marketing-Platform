@@ -10,6 +10,13 @@ export interface ImportResult {
   errorDetails: string[];
 }
 
+export interface ColumnMapping {
+  email?: string;
+  firstName?: string;
+  lastName?: string;
+  attributes?: Record<string, string>;
+}
+
 @Injectable()
 export class ContactsService {
   private readonly logger = new Logger(ContactsService.name);
@@ -21,15 +28,14 @@ export class ContactsService {
   // ---------------------------------------------------------------------------
 
   /**
-   * Parse a CSV buffer and upsert Contacts into the given audience.
-   * Dedup rule: same email within the same audienceId → update (skip re-insert).
-   * Email is normalised to lowercase before comparison and storage.
-   *
-   * Expected CSV columns: email (required), any others are ignored.
+   * Import contacts from a CSV buffer into the specified audience.
+   * Supports custom column mapping from the web UI, or automatically auto-detects
+   * columns and saves any extra columns into the contact's custom JSON attributes.
    */
   async importCsv(
     audienceId: string,
     fileBuffer: Buffer,
+    mapping?: ColumnMapping,
   ): Promise<ImportResult> {
     // Validate audience exists
     const audience = await this.prisma.audience.findUnique({
@@ -41,6 +47,24 @@ export class ContactsService {
     }
 
     const rows = await this.parseCsv(fileBuffer);
+    if (rows.length === 0) {
+      return { imported: 0, skipped: 0, errors: 0, errorDetails: [] };
+    }
+
+    // Helper to find a value in a row by possible header names
+    const findField = (row: Record<string, string>, explicitKey?: string, fallbackGuesses: string[] = []): string | undefined => {
+      if (explicitKey && row[explicitKey] !== undefined) {
+        return row[explicitKey];
+      }
+      for (const guess of fallbackGuesses) {
+        // Exact match
+        if (row[guess] !== undefined) return row[guess];
+        // Case-insensitive match
+        const foundKey = Object.keys(row).find(k => k.trim().toLowerCase() === guess.toLowerCase());
+        if (foundKey && row[foundKey] !== undefined) return row[foundKey];
+      }
+      return undefined;
+    };
 
     let imported = 0;
     let skipped = 0;
@@ -51,41 +75,83 @@ export class ContactsService {
       const rowNum = i + 2; // 1-indexed + header row
       const raw = rows[i];
 
-      // Require the email column
-      if (!raw['email'] || typeof raw['email'] !== 'string' || !raw['email'].trim()) {
+      // Resolve email using mapping or common aliases
+      const rawEmail = findField(raw, mapping?.email, ['email', 'Email', 'EMAIL', 'e-mail', 'E-mail', 'mail', 'Mail', 'Contact Email']);
+      if (!rawEmail || typeof rawEmail !== 'string' || !rawEmail.trim()) {
         errors++;
         errorDetails.push(`Row ${rowNum}: missing or empty email`);
         continue;
       }
 
-      const email = raw['email'].trim().toLowerCase();
-
-      // Basic email format check
+      const email = rawEmail.trim().toLowerCase();
       if (!email.includes('@')) {
         errors++;
         errorDetails.push(`Row ${rowNum}: invalid email "${email}"`);
         continue;
       }
 
+      // Resolve first and last name
+      const rawFirstName = findField(raw, mapping?.firstName, ['firstName', 'First Name', 'firstname', 'first_name', 'FName', 'First']);
+      const rawLastName = findField(raw, mapping?.lastName, ['lastName', 'Last Name', 'lastname', 'last_name', 'LName', 'Last']);
+
+      const firstName = rawFirstName?.trim() || null;
+      const lastName = rawLastName?.trim() || null;
+
+      // Extract custom attributes
+      const customAttributes: Record<string, string> = {};
+
+      if (mapping?.attributes && Object.keys(mapping.attributes).length > 0) {
+        // User provided specific attribute tag mappings
+        for (const [tag, colRaw] of Object.entries(mapping.attributes)) {
+          const col = String(colRaw);
+          if (raw[col] !== undefined && raw[col].trim() !== '') {
+            customAttributes[tag] = raw[col].trim();
+          }
+        }
+      } else {
+        // Auto-capture any remaining column not used as email/firstName/lastName
+        const standardHeaders = new Set([
+          (mapping?.email || 'email').toLowerCase(),
+          (mapping?.firstName || 'firstname').toLowerCase(),
+          'first name', 'first_name',
+          (mapping?.lastName || 'lastname').toLowerCase(),
+          'last name', 'last_name',
+        ]);
+
+        for (const [header, val] of Object.entries(raw)) {
+          const cleanHeader = header.trim();
+          const normalized = cleanHeader.toLowerCase().replace(/[^a-z0-9_]/g, '_');
+          if (!standardHeaders.has(cleanHeader.toLowerCase()) && !standardHeaders.has(normalized) && val && val.trim() !== '') {
+            customAttributes[normalized] = val.trim();
+            // Also store original clean header name as key
+            if (normalized !== cleanHeader) {
+              customAttributes[cleanHeader] = val.trim();
+            }
+          }
+        }
+      }
+
       try {
-        const result = await this.prisma.contact.upsert({
+        await this.prisma.contact.upsert({
           where: {
             audienceId_email: { audienceId, email },
           },
-          create: { email, audienceId },
-          update: {}, // no-op on duplicate — contact already exists
+          create: {
+            email,
+            firstName,
+            lastName,
+            attributes: Object.keys(customAttributes).length > 0 ? customAttributes : undefined,
+            audienceId,
+          },
+          update: {
+            firstName: firstName || undefined,
+            lastName: lastName || undefined,
+            attributes: Object.keys(customAttributes).length > 0 ? customAttributes : undefined,
+          },
         });
 
-        // Detect skip: if the returned id already existed (upsert with empty update)
-        // We track skipped vs imported by checking if upsert was a no-op.
-        // Since Prisma upsert always returns the row, we use a separate findUnique
-        // check isn't needed — instead track via a pre-check.
-        // Simple heuristic: attempt createMany and count failures as skips.
-        void result;
         imported++;
       } catch (err: any) {
-        // Unique constraint violation = genuine duplicate (shouldn't happen with upsert,
-        // but guard against race conditions)
         if (err?.code === 'P2002') {
           skipped++;
         } else {
