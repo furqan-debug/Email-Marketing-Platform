@@ -31,8 +31,15 @@ async function bootstrap() {
 
   // Enable CORS so the Vercel frontend can call this API
   app.enableCors({
-    origin: true,
+    origin: (origin, callback) => {
+      // Allow all origins or requests without origin (e.g. server-to-server/curl)
+      callback(null, true);
+    },
     credentials: true,
+    methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With', 'Origin'],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   });
 
   // Global exception filter — logs real errors to stdout (visible in Railway)
