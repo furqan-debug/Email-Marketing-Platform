@@ -149,11 +149,14 @@ export class CampaignMessagesService {
    * On natural completion (all messages enqueued): status → COMPLETED.
    */
   async dispatchCampaign(campaignId: string): Promise<void> {
-    // Fetch campaign with contact emails (needed for enqueueing)
+    // Fetch campaign with contact emails + optional template
     const campaign = await this.prisma.campaign.findUnique({
       where: { id: campaignId },
       include: {
-        audience: { include: { contacts: { select: { id: true, email: true } } } },
+        audience: {
+          include: { contacts: { select: { id: true, email: true, firstName: true, lastName: true } } },
+        },
+        template: { select: { html: true, subject: true } },
       },
     });
 
@@ -162,9 +165,26 @@ export class CampaignMessagesService {
       return;
     }
 
-    // Build a contactId → email map for quick lookup
-    const contactMap = new Map(
-      campaign.audience.contacts.map((c) => [c.id, c.email]),
+    // Resolve base HTML body: templateId wins over htmlBody
+    const baseHtml = campaign.template?.html ?? campaign.htmlBody;
+    if (!baseHtml) {
+      this.logger.error(`dispatchCampaign: campaign ${campaignId} has no htmlBody and no templateId — aborting`);
+      await this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: { status: CampaignStatus.CANCELLED },
+      });
+      return;
+    }
+
+    // Resolve subject: campaign.subject → template.subject → campaign.name
+    const emailSubject = campaign.subject
+      || campaign.template?.subject
+      || campaign.name;
+
+    // Build a contactId → contact map for rendering
+    type ContactEntry = { id: string; email: string; firstName: string | null; lastName: string | null };
+    const contactMap = new Map<string, ContactEntry>(
+      campaign.audience.contacts.map((c) => [c.id, c as ContactEntry]),
     );
 
     // Fetch all Message rows not yet enqueued for this campaign
@@ -206,34 +226,56 @@ export class CampaignMessagesService {
         return; // leave status as PAUSED/CANCELLED; do not update to COMPLETED
       }
 
-      const email = contactMap.get(message.contactId);
-      if (!email) {
+      const contact = contactMap.get(message.contactId);
+      if (!contact) {
         this.logger.warn(
           `Campaign ${campaignId}: contact ${message.contactId} not found in audience map — skipping`,
         );
         continue;
       }
 
-      // ── Send directly via email provider (no BullMQ needed) ──────────────
-      let html = `<p>Campaign: ${campaign.name}</p>`;
-      const msgId = message.id;
+      // ── Render per-contact HTML ───────────────────────────────────────────
+      const msgId   = message.id;
+      const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
 
-      // Inject tracking pixel + wrap links (mirrors EmailWorker logic)
+      // 1. Substitute {{first_name}} / {{last_name}} / {{email}} placeholders
+      let html = baseHtml.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => {
+        switch (key.toLowerCase()) {
+          case 'first_name': return contact.firstName ?? '';
+          case 'last_name':  return contact.lastName  ?? '';
+          case 'email':      return contact.email;
+          default:           return '';
+        }
+      });
+
+      // 2. Append unsubscribe footer (before tracking wrap)
+      const unsubToken  = this.trackingService.generateToken(msgId);
+      const unsubUrl    = `${baseUrl}/t/unsub/${unsubToken}`;
+      const unsubFooter = `
+<div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#888;">
+  <p>You received this email because you are on our mailing list.<br>
+  <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></p>
+</div>`;
+      if (/<\/body>/i.test(html)) {
+        html = html.replace(/<\/body>/i, `${unsubFooter}</body>`);
+      } else {
+        html += unsubFooter;
+      }
+
+      // 3. Inject tracking pixel + wrap links
       try {
-        const token = this.trackingService.generateToken(msgId);
-        await this.trackingService.saveToken(msgId, token);
-        const baseUrl = (process.env.APP_BASE_URL ?? 'http://localhost:3000').replace(/\/$/, '');
-        html = this.trackingService.wrapHtml(html, token, baseUrl);
+        await this.trackingService.saveToken(msgId, unsubToken);
+        html = this.trackingService.wrapHtml(html, unsubToken, baseUrl);
       } catch (trackErr: any) {
         this.logger.warn(`Tracking setup failed (continuing): ${trackErr?.message ?? trackErr}`);
       }
 
       const result = await this.emailProvider.send({
-        to: email as string,
-        subject: campaign.name,
+        to: contact.email as string,
+        subject: emailSubject,
         html,
       });
-      this.logger.log(`Sent message ${msgId} to ${email} — providerId: ${result.providerId}`);
+      this.logger.log(`Sent message ${msgId} to ${contact.email} — providerId: ${result.providerId}`);
 
       // Update Message with SES MessageId + mark enqueued
       await this.prisma.message.update({

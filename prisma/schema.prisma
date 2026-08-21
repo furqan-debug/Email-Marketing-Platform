@@ -40,6 +40,11 @@ generator client {
  model Campaign {
    id         String             @id @default(uuid())
    name       String
+   subject    String?            // email subject line (defaults to name if blank)
+   fromName   String?            // "Display Name" shown in inbox
+   htmlBody   String?            // raw HTML body (used when templateId is null)
+   templateId String?            // optional: use a saved Template instead
+   template   Template?          @relation(fields: [templateId], references: [id])
    status     String             @default("DRAFT")
    audienceId String
    audience   Audience           @relation(fields: [audienceId], references: [id])
@@ -76,28 +81,31 @@ generator client {
    workspace   Workspace @relation(fields: [workspaceId], references: [id])
    email       String
    createdAt   DateTime  @default(now())
- 
+
    @@unique([workspaceId, email])
  }
 
  model Template {
-   id      String  @id @default(uuid())
-   name    String
-   subject String?
-   html    String
+   id        String     @id @default(uuid())
+   name      String
+   subject   String?
+   html      String
+   campaigns Campaign[]
  }
 
  model AnalyticsSnapshot {
-   id         String   @id @default(uuid())
-   campaignId String   @unique
-   campaign   Campaign @relation(fields: [campaignId], references: [id])
-   sent       Int      @default(0)
-   delivered  Int      @default(0)
-   opened     Int      @default(0)
-   clicked    Int      @default(0)
-   bounced    Int      @default(0)
-   complained Int      @default(0)
-   computedAt DateTime @default(now())
+   id          String   @id @default(uuid())
+   campaignId  String   @unique
+   campaign    Campaign @relation(fields: [campaignId], references: [id])
+   sent        Int      @default(0)
+   delivered   Int      @default(0)
+   opened      Int      @default(0)   // unique openers (COUNT DISTINCT messageId)
+   clicked     Int      @default(0)   // unique clickers (COUNT DISTINCT messageId)
+   totalOpens  Int      @default(0)   // raw total open events (same message can fire many)
+   totalClicks Int      @default(0)   // raw total click events
+   bounced     Int      @default(0)
+   complained  Int      @default(0)
+   computedAt  DateTime @default(now())
  }
 
  model WorkflowExecution {

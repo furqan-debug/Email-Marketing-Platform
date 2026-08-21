@@ -64,6 +64,35 @@ export class TrackingService {
   }
 
   /**
+   * Resolve a message ID to the data needed for unsubscribe:
+   * contact email + workspace ID (via contact → audience → workspace).
+   */
+  async getMessageWithWorkspace(
+    messageId: string,
+  ): Promise<{ email: string; workspaceId: string } | null> {
+    try {
+      const message = await this.prisma.message.findUnique({
+        where: { id: messageId },
+        include: {
+          contact: {
+            select: {
+              email: true,
+              audience: { select: { workspaceId: true } },
+            },
+          },
+        },
+      });
+      if (!message?.contact) return null;
+      return {
+        email:       message.contact.email,
+        workspaceId: message.contact.audience.workspaceId,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Persist the generated token on the Message row.
    * Called immediately after the token is generated (pre-send).
    */

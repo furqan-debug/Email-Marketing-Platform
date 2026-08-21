@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CampaignMessagesService,
@@ -41,14 +41,37 @@ export class CampaignsController {
 
   /**
    * POST /campaigns
-   * Body: { name, audienceId, templateId? }
+   * Body: { name, audienceId, subject?, fromName?, htmlBody?, templateId? }
+   * Either htmlBody or templateId is required — a campaign with no body cannot be sent.
    * Creates a new campaign in DRAFT status.
    */
   @Post()
   @HttpCode(201)
-  createCampaign(@Body() body: { name: string; audienceId: string; templateId?: string }) {
+  createCampaign(
+    @Body()
+    body: {
+      name: string;
+      audienceId: string;
+      subject?: string;
+      fromName?: string;
+      htmlBody?: string;
+      templateId?: string;
+    },
+  ) {
+    if (!body.htmlBody && !body.templateId) {
+      throw new BadRequestException(
+        'Either htmlBody or templateId is required — a campaign must have an email body.',
+      );
+    }
     return this.prisma.campaign.create({
-      data: { name: body.name, audienceId: body.audienceId },
+      data: {
+        name:       body.name,
+        audienceId: body.audienceId,
+        subject:    body.subject    ?? null,
+        fromName:   body.fromName   ?? null,
+        htmlBody:   body.htmlBody   ?? null,
+        templateId: body.templateId ?? null,
+      },
     });
   }
 

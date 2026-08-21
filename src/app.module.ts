@@ -11,6 +11,7 @@ import { CampaignsModule } from './campaigns/campaigns.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { PrismaModule } from './prisma/prisma.module';
+import { TemplatesModule } from './templates/templates.module';
 import IORedis from 'ioredis';
 
 @Module({
@@ -38,6 +39,7 @@ import IORedis from 'ioredis';
     AnalyticsModule,
     WorkflowsModule,
     PrismaModule,
+    TemplatesModule,
   ],
   controllers: [AppController],
   providers: [AppService],

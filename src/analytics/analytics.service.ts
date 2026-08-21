@@ -1,23 +1,15 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
-// ── Metric keys that map to Event.type values ─────────────────────────────────
-const EVENT_TYPE_MAP: Record<string, keyof SnapshotCounts> = {
-  Send:      'sent',
-  Delivery:  'delivered',
-  Open:      'opened',
-  Click:     'clicked',
-  Bounce:    'bounced',
-  Complaint: 'complained',
-};
-
 interface SnapshotCounts {
-  sent:       number;
-  delivered:  number;
-  opened:     number;
-  clicked:    number;
-  bounced:    number;
-  complained: number;
+  sent:        number;
+  delivered:   number;
+  opened:      number;   // unique openers
+  clicked:     number;   // unique clickers
+  totalOpens:  number;   // raw total open events
+  totalClicks: number;   // raw total click events
+  bounced:     number;
+  complained:  number;
 }
 
 export interface AnalyticsRates {
@@ -29,10 +21,10 @@ export interface AnalyticsRates {
 }
 
 export interface AnalyticsResult extends SnapshotCounts {
-  campaignId:  string;
-  rates:       AnalyticsRates;
-  computedAt:  Date;
-  staleWarning: boolean; // true if computedAt > STALE_THRESHOLD_MS ago
+  campaignId:   string;
+  rates:        AnalyticsRates;
+  computedAt:   Date;
+  staleWarning: boolean;
 }
 
 const STALE_THRESHOLD_MS = 30 * 60 * 1000; // 30 minutes
@@ -71,14 +63,16 @@ export class AnalyticsService {
 
     const counts: SnapshotCounts = snapshot
       ? {
-          sent:       snapshot.sent,
-          delivered:  snapshot.delivered,
-          opened:     snapshot.opened,
-          clicked:    snapshot.clicked,
-          bounced:    snapshot.bounced,
-          complained: snapshot.complained,
+          sent:        snapshot.sent,
+          delivered:   snapshot.delivered,
+          opened:      snapshot.opened,
+          clicked:     snapshot.clicked,
+          totalOpens:  (snapshot as any).totalOpens  ?? 0,
+          totalClicks: (snapshot as any).totalClicks ?? 0,
+          bounced:     snapshot.bounced,
+          complained:  snapshot.complained,
         }
-      : { sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, complained: 0 };
+      : { sent: 0, delivered: 0, opened: 0, clicked: 0, totalOpens: 0, totalClicks: 0, bounced: 0, complained: 0 };
 
     const computedAt = snapshot?.computedAt ?? new Date(0);
     const staleWarning = !snapshot || (Date.now() - computedAt.getTime() > STALE_THRESHOLD_MS);
@@ -99,26 +93,51 @@ export class AnalyticsService {
   /**
    * Aggregates all Event rows for a single campaign into a snapshot.
    *
-   * Uses a single GROUP BY query against Event JOIN Message — one DB
-   * round-trip regardless of how many events exist. Upserts on campaignId
-   * so re-running is safe.
+   * Opens and Clicks use COUNT DISTINCT messageId → unique recipients.
+   * totalOpens / totalClicks use COUNT(*) → raw event fires.
+   * All other event types (Send, Delivery, Bounce, Complaint) are counted
+   * with COUNT DISTINCT (one per message by nature).
+   *
+   * Upserts on campaignId so re-running is safe.
    */
   async computeForCampaign(campaignId: string): Promise<AnalyticsResult> {
-    // Single aggregation query: COUNT events by type for this campaign
-    const rows = await this.prisma.client.$queryRaw<Array<{ type: string; count: bigint }>>`
-      SELECT e.type, COUNT(*) AS count
+    // Single aggregation query: both total and unique counts per event type
+    const rows = await this.prisma.client.$queryRaw<
+      Array<{ type: string; total_count: bigint; unique_count: bigint }>
+    >`
+      SELECT
+        e.type,
+        COUNT(*)                       AS total_count,
+        COUNT(DISTINCT e."messageId")  AS unique_count
       FROM "Event" e
       INNER JOIN "Message" m ON m.id = e."messageId"
       WHERE m."campaignId" = ${campaignId}
       GROUP BY e.type
     `;
 
-    // Map results to named counts
-    const counts: SnapshotCounts = { sent: 0, delivered: 0, opened: 0, clicked: 0, bounced: 0, complained: 0 };
+    const counts: SnapshotCounts = {
+      sent: 0, delivered: 0,
+      opened: 0, clicked: 0,
+      totalOpens: 0, totalClicks: 0,
+      bounced: 0, complained: 0,
+    };
+
     for (const row of rows) {
-      const field = EVENT_TYPE_MAP[row.type];
-      if (field) {
-        counts[field] = Number(row.count);
+      const unique = Number(row.unique_count);
+      const total  = Number(row.total_count);
+      switch (row.type) {
+        case 'Send':      counts.sent       = unique; break;
+        case 'Delivery':  counts.delivered  = unique; break;
+        case 'Open':
+          counts.opened     = unique; // unique openers
+          counts.totalOpens = total;  // raw fires
+          break;
+        case 'Click':
+          counts.clicked     = unique; // unique clickers
+          counts.totalClicks = total;  // raw fires
+          break;
+        case 'Bounce':    counts.bounced    = unique; break;
+        case 'Complaint': counts.complained = unique; break;
       }
     }
 
@@ -132,8 +151,10 @@ export class AnalyticsService {
     });
 
     this.logger.log(
-      `Snapshot computed for campaign ${campaignId}: sent=${counts.sent} delivered=${counts.delivered} ` +
-      `opened=${counts.opened} clicked=${counts.clicked} bounced=${counts.bounced} complained=${counts.complained}`,
+      `Snapshot for ${campaignId}: sent=${counts.sent} delivered=${counts.delivered} ` +
+      `opened=${counts.opened}(unique)/${counts.totalOpens}(total) ` +
+      `clicked=${counts.clicked}(unique)/${counts.totalClicks}(total) ` +
+      `bounced=${counts.bounced} complained=${counts.complained}`,
     );
 
     return {

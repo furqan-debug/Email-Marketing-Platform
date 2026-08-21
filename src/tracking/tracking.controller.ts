@@ -11,12 +11,16 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 import { TrackingService, TRANSPARENT_GIF } from './tracking.service';
+import { ContactsService } from '../contacts/contacts.service';
 
 @Controller('t')
 export class TrackingController {
   private readonly logger = new Logger(TrackingController.name);
 
-  constructor(private readonly trackingService: TrackingService) {}
+  constructor(
+    private readonly trackingService: TrackingService,
+    private readonly contactsService: ContactsService,
+  ) {}
 
   /**
    * Tracking pixel endpoint.
@@ -100,6 +104,63 @@ export class TrackingController {
         this.logger.error(`trackClick error: ${err?.message ?? err}`);
       }
     });
+  }
+
+  /**
+   * GET /t/unsub/:token (also accessible as /unsubscribe/:token via alias controller)
+   * Resolves the tracking token to find the contact, suppresses them in their
+   * workspace, and returns a plain HTML confirmation page.
+   * Always returns 200 — never exposes an error page to the recipient.
+   */
+  @Get('unsub/:token')
+  async unsubscribe(
+    @Param('token') token: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    const okHtml = `<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Unsubscribed</title>
+<style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#f9f9f9;}
+.card{background:#fff;border-radius:12px;padding:40px;max-width:400px;text-align:center;box-shadow:0 2px 16px rgba(0,0,0,.08);}
+h1{font-size:1.4rem;color:#333;}p{color:#666;}</style>
+</head>
+<body><div class="card">
+<h1>You have been unsubscribed</h1>
+<p>You will no longer receive marketing emails from us.<br>If this was a mistake, please contact us directly.</p>
+</div></body></html>`;
+
+    const neutralHtml = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><title>Unsubscribed</title></head>
+<body style="font-family:sans-serif;text-align:center;padding:60px;">
+<h2>Already unsubscribed or link is no longer valid.</h2>
+<p>You are already opted out, or this link has expired.</p>
+</body></html>`;
+
+    try {
+      const message = await this.trackingService.resolveToken(token);
+      if (!message) {
+        res.status(200).set('Content-Type', 'text/html').send(neutralHtml);
+        return;
+      }
+
+      // Resolve contact + workspace via message → campaign → audience
+      const fullMessage = await this.trackingService.getMessageWithWorkspace(message.id);
+      if (!fullMessage) {
+        res.status(200).set('Content-Type', 'text/html').send(neutralHtml);
+        return;
+      }
+
+      await this.contactsService.suppress(
+        fullMessage.workspaceId,
+        fullMessage.email,
+      );
+      this.logger.log(`Unsubscribed ${fullMessage.email} from workspace ${fullMessage.workspaceId} via token`);
+    } catch (err: any) {
+      this.logger.error(`Unsubscribe error: ${err?.message ?? err}`);
+    }
+
+    res.status(200).set('Content-Type', 'text/html').send(okHtml);
   }
 
   // ---------------------------------------------------------------------------
