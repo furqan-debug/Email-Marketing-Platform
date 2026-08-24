@@ -271,18 +271,23 @@ export class CampaignMessagesService {
       let html = renderMergeTags(baseHtml, contact);
       const personalSubject = renderMergeTags(emailSubject, contact);
 
-      // 2. Append unsubscribe footer (before tracking wrap)
+      // 2. Unsubscribe Link / Footer
       const unsubToken  = this.trackingService.generateToken(msgId);
       const unsubUrl    = `${baseUrl}/t/unsub/${unsubToken}`;
-      const unsubFooter = `
-<div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#888;">
-  <p>You received this email because you are on our mailing list.<br>
-  <a href="${unsubUrl}" style="color:#888;">Unsubscribe</a></p>
-</div>`;
-      if (/<\/body>/i.test(html)) {
-        html = html.replace(/<\/body>/i, `${unsubFooter}</body>`);
+
+      // If template contains {{unsubscribe}} or {{unsubscribe_url}}, replace it
+      if (/\{\{\s*unsubscribe(?:_url)?\s*\}\}/i.test(html)) {
+        html = html.replace(/\{\{\s*unsubscribe(?:_url)?\s*\}\}/gi, unsubUrl);
       } else {
-        html += unsubFooter;
+        const unsubFooter = `
+<div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#888;">
+  <a href="${unsubUrl}" style="color:#888;text-decoration:underline;">Unsubscribe</a>
+</div>`;
+        if (/<\/body>/i.test(html)) {
+          html = html.replace(/<\/body>/i, `${unsubFooter}</body>`);
+        } else {
+          html += unsubFooter;
+        }
       }
 
       // 3. Inject tracking pixel + wrap links
