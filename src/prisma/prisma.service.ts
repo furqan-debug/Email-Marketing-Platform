@@ -57,4 +57,6 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get template()          { return (this.client as any).template; }
   get analyticsSnapshot() { return (this.client as any).analyticsSnapshot; }
   get workflowExecution() { return (this.client as any).workflowExecution; }
+
+  $transaction(arg: any) { return (this.client as any).$transaction(arg); }
 }

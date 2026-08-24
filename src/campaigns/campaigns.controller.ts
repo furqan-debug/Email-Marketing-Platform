@@ -1,4 +1,14 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, NotFoundException, Param, Post } from '@nestjs/common';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Post,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   CampaignMessagesService,
@@ -134,5 +144,39 @@ export class CampaignsController {
   @HttpCode(200)
   cancel(@Param('id') id: string): Promise<CampaignStatusResult> {
     return this.campaignMessages.cancelCampaign(id);
+  }
+
+  /**
+   * DELETE /campaigns/:id
+   * Permanently deletes campaign, its messages, tracking events, and analytics snapshot.
+   */
+  @Delete(':id')
+  @HttpCode(200)
+  async deleteCampaign(@Param('id') id: string): Promise<{ id: string; deleted: boolean }> {
+    const campaign = await this.prisma.campaign.findUnique({ where: { id } });
+    if (!campaign) throw new NotFoundException(`Campaign ${id} not found`);
+
+    const messages = await this.prisma.message.findMany({
+      where: { campaignId: id },
+      select: { id: true },
+    });
+    const messageIds = messages.map(m => m.id);
+
+    await this.prisma.$transaction([
+      this.prisma.event.deleteMany({
+        where: { messageId: { in: messageIds } },
+      }),
+      this.prisma.message.deleteMany({
+        where: { campaignId: id },
+      }),
+      this.prisma.analyticsSnapshot.deleteMany({
+        where: { campaignId: id },
+      }),
+      this.prisma.campaign.delete({
+        where: { id },
+      }),
+    ]);
+
+    return { id, deleted: true };
   }
 }
