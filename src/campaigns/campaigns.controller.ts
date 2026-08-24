@@ -54,6 +54,8 @@ export class CampaignsController {
       audienceId: string;
       subject?: string;
       fromName?: string;
+      fromEmail?: string;
+      replyTo?: string;
       htmlBody?: string;
       templateId?: string;
     },
@@ -69,6 +71,8 @@ export class CampaignsController {
         audienceId: body.audienceId,
         subject:    body.subject    ?? null,
         fromName:   body.fromName   ?? null,
+        fromEmail:  body.fromEmail  ?? null,
+        replyTo:    body.replyTo    ?? null,
         htmlBody:   body.htmlBody   ?? null,
         templateId: body.templateId ?? null,
       },

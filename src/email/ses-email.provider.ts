@@ -34,20 +34,24 @@ export class SesEmailProvider implements EmailProvider {
     to: string;
     subject: string;
     html: string;
+    from?: string;
+    replyTo?: string[];
   }): Promise<{ providerId: string }> {
     const configurationSet = process.env.AWS_SES_CONFIGURATION_SET;
+    const source = message.from || this.fromAddress;
 
     const params: SendEmailCommandInput = {
-      Source: this.fromAddress,
+      Source: source,
       Destination: { ToAddresses: [message.to] },
       Message: {
         Subject: { Data: message.subject, Charset: 'UTF-8' },
         Body: { Html: { Data: message.html, Charset: 'UTF-8' } },
       },
+      ...(message.replyTo && message.replyTo.length > 0 ? { ReplyToAddresses: message.replyTo } : {}),
       ...(configurationSet ? { ConfigurationSetName: configurationSet } : {}),
     };
 
-    this.logger.log(`[SES] Sending email to ${message.to} | Subject: ${message.subject}`);
+    this.logger.log(`[SES] Sending email to ${message.to} from "${source}" | Subject: ${message.subject}`);
     const response = await this.client.send(new SendEmailCommand(params));
     const providerId = response.MessageId ?? 'ses-unknown';
     this.logger.log(`[SES] Sent successfully. MessageId: ${providerId}`);

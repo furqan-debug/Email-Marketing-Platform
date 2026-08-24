@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "fromEmail" TEXT,
+ADD COLUMN IF NOT EXISTS "replyTo" TEXT;

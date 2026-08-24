@@ -39,19 +39,21 @@ generator client {
 }
 
  model Campaign {
-   id         String             @id @default(uuid())
-   name       String
-   subject    String?            // email subject line (defaults to name if blank)
-   fromName   String?            // "Display Name" shown in inbox
-   htmlBody   String?            // raw HTML body (used when templateId is null)
-   templateId String?            // optional: use a saved Template instead
-   template   Template?          @relation(fields: [templateId], references: [id])
-   status     String             @default("DRAFT")
-   audienceId String
-   audience   Audience           @relation(fields: [audienceId], references: [id])
-   messages   Message[]
-   snapshot   AnalyticsSnapshot?
- }
+  id         String             @id @default(uuid())
+  name       String
+  subject    String?            // email subject line (defaults to name if blank)
+  fromName   String?            // "Display Name" shown in inbox (e.g. "Digireps Team")
+  fromEmail  String?            // custom sender email (e.g. "support@digireps.org")
+  replyTo    String?            // optional reply-to address
+  htmlBody   String?            // raw HTML body (used when templateId is null)
+  templateId String?            // optional: use a saved Template instead
+  template   Template?          @relation(fields: [templateId], references: [id])
+  status     String             @default("DRAFT")
+  audienceId String
+  audience   Audience           @relation(fields: [audienceId], references: [id])
+  messages   Message[]
+  snapshot   AnalyticsSnapshot?
+}
 
  model Message {
    id            String    @id @default(uuid())

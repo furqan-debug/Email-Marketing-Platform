@@ -293,12 +293,25 @@ export class CampaignMessagesService {
         this.logger.warn(`Tracking setup failed (continuing): ${trackErr?.message ?? trackErr}`);
       }
 
+      // Resolve custom from and reply-to
+      const defaultFromAddress = process.env.AWS_SES_FROM_ADDRESS || 'noreply@digireps.org';
+      const senderEmail = (campaign as any).fromEmail?.trim() || defaultFromAddress;
+      const senderFrom = (campaign as any).fromName?.trim()
+        ? `"${(campaign as any).fromName.trim()}" <${senderEmail}>`
+        : senderEmail;
+
+      const replyTo = (campaign as any).replyTo?.trim()
+        ? [(campaign as any).replyTo.trim()]
+        : [senderEmail];
+
       const result = await this.emailProvider.send({
         to: contact.email as string,
         subject: personalSubject,
         html,
+        from: senderFrom,
+        replyTo,
       });
-      this.logger.log(`Sent message ${msgId} to ${contact.email} — providerId: ${result.providerId}`);
+      this.logger.log(`Sent message ${msgId} to ${contact.email} from ${senderFrom} — providerId: ${result.providerId}`);
 
       // Update Message with SES MessageId + mark enqueued
       await this.prisma.message.update({
