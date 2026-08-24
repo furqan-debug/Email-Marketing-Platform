@@ -15,12 +15,12 @@ export class CampaignsController {
 
   /**
    * GET /campaigns
-   * Returns all campaigns (id, name, status, audienceId).
+   * Returns all campaigns with their analytics snapshots.
    */
   @Get()
   listCampaigns() {
     return this.prisma.campaign.findMany({
-      select: { id: true, name: true, status: true, audienceId: true },
+      include: { snapshot: true },
       orderBy: { id: 'desc' },
     });
   }
