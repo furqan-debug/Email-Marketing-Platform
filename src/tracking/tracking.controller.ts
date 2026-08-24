@@ -1,6 +1,7 @@
 import {
   Controller,
   Get,
+  Post,
   Param,
   Query,
   Req,
@@ -161,6 +162,38 @@ h1{font-size:1.4rem;color:#333;}p{color:#666;}</style>
     }
 
     res.status(200).set('Content-Type', 'text/html').send(okHtml);
+  }
+
+  /**
+   * POST /t/unsub/:token
+   * RFC 8058 one-click unsubscribe — Gmail calls this when the user clicks the
+   * blue "Unsubscribe" link in the email header (List-Unsubscribe-Post: List-Unsubscribe=One-Click).
+   * Must return 200 with no redirect.
+   */
+  @Post('unsub/:token')
+  async unsubscribeOneClick(
+    @Param('token') token: string,
+    @Res() res: Response,
+  ): Promise<void> {
+    try {
+      const message = await this.trackingService.resolveToken(token);
+      if (message) {
+        const fullMessage = await this.trackingService.getMessageWithWorkspace(message.id);
+        if (fullMessage) {
+          await this.contactsService.suppress(
+            fullMessage.workspaceId,
+            fullMessage.email,
+          );
+          this.logger.log(
+            `[OneClick] Unsubscribed ${fullMessage.email} from workspace ${fullMessage.workspaceId}`,
+          );
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`[OneClick] Unsubscribe error: ${err?.message ?? err}`);
+    }
+    // RFC 8058 requires 200 OK with no body for one-click
+    res.status(200).send('');
   }
 
   // ---------------------------------------------------------------------------

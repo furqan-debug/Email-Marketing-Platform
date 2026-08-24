@@ -6,6 +6,8 @@ export interface SendMessageOptions {
   html: string;
   from?: string;
   replyTo?: string[];
+  /** RFC 8058 one-click unsubscribe URL — adds List-Unsubscribe + List-Unsubscribe-Post headers */
+  listUnsubscribeUrl?: string;
 }
 
 export interface EmailProvider {

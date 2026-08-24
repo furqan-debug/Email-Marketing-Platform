@@ -310,6 +310,7 @@ export class CampaignMessagesService {
         html,
         from: senderFrom,
         replyTo,
+        listUnsubscribeUrl: unsubUrl,
       });
       this.logger.log(`Sent message ${msgId} to ${contact.email} from ${senderFrom} — providerId: ${result.providerId}`);
 

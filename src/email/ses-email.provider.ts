@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import {
   SESClient,
-  SendEmailCommand,
-  SendEmailCommandInput,
+  SendRawEmailCommand,
 } from '@aws-sdk/client-ses';
-import type { EmailProvider } from './email.provider';
+import type { EmailProvider, SendMessageOptions } from './email.provider';
 
 @Injectable()
 export class SesEmailProvider implements EmailProvider {
@@ -15,8 +14,6 @@ export class SesEmailProvider implements EmailProvider {
   constructor() {
     // All config read from environment variables — nothing hardcoded.
     // Required: AWS_REGION, AWS_SES_FROM_ADDRESS
-    // Credentials (AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY, or
-    // AWS_PROFILE, or an IAM role) are picked up automatically by the SDK.
     const region = process.env.AWS_REGION;
     if (!region) {
       throw new Error('AWS_REGION environment variable is required for SesEmailProvider');
@@ -30,31 +27,96 @@ export class SesEmailProvider implements EmailProvider {
     this.client = new SESClient({ region });
   }
 
-  async send(message: {
-    to: string;
-    subject: string;
-    html: string;
-    from?: string;
-    replyTo?: string[];
-  }): Promise<{ providerId: string }> {
+  async send(message: SendMessageOptions): Promise<{ providerId: string }> {
     const configurationSet = process.env.AWS_SES_CONFIGURATION_SET;
     const source = message.from || this.fromAddress;
+    const replyToAddresses = message.replyTo && message.replyTo.length > 0
+      ? message.replyTo
+      : [source];
 
-    const params: SendEmailCommandInput = {
-      Source: source,
-      Destination: { ToAddresses: [message.to] },
-      Message: {
-        Subject: { Data: message.subject, Charset: 'UTF-8' },
-        Body: { Html: { Data: message.html, Charset: 'UTF-8' } },
-      },
-      ...(message.replyTo && message.replyTo.length > 0 ? { ReplyToAddresses: message.replyTo } : {}),
-      ...(configurationSet ? { ConfigurationSetName: configurationSet } : {}),
-    };
+    // Build a raw MIME message so we can inject custom headers
+    // (SendEmailCommand does not support arbitrary headers)
+    const boundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
-    this.logger.log(`[SES] Sending email to ${message.to} from "${source}" | Subject: ${message.subject}`);
-    const response = await this.client.send(new SendEmailCommand(params));
+    const headers: string[] = [
+      `From: ${source}`,
+      `To: ${message.to}`,
+      `Subject: ${this.encodeMimeHeader(message.subject)}`,
+      `Reply-To: ${replyToAddresses.join(', ')}`,
+      `MIME-Version: 1.0`,
+      `Content-Type: multipart/alternative; boundary="${boundary}"`,
+    ];
+
+    // RFC 8058 one-click unsubscribe headers — Gmail shows the blue "Unsubscribe" link
+    if (message.listUnsubscribeUrl) {
+      headers.push(`List-Unsubscribe: <${message.listUnsubscribeUrl}>`);
+      headers.push(`List-Unsubscribe-Post: List-Unsubscribe=One-Click`);
+    }
+
+    if (configurationSet) {
+      headers.push(`X-SES-CONFIGURATION-SET: ${configurationSet}`);
+    }
+
+    const rawMessage = [
+      headers.join('\r\n'),
+      '',
+      `--${boundary}`,
+      'Content-Type: text/html; charset=UTF-8',
+      'Content-Transfer-Encoding: quoted-printable',
+      '',
+      this.encodeQuotedPrintable(message.html),
+      '',
+      `--${boundary}--`,
+    ].join('\r\n');
+
+    this.logger.log(
+      `[SES] Sending email to ${message.to} from "${source}" | Subject: ${message.subject}` +
+      (message.listUnsubscribeUrl ? ' | List-Unsubscribe header included' : ''),
+    );
+
+    const response = await this.client.send(
+      new SendRawEmailCommand({
+        RawMessage: { Data: Buffer.from(rawMessage, 'utf-8') },
+      }),
+    );
+
     const providerId = response.MessageId ?? 'ses-unknown';
     this.logger.log(`[SES] Sent successfully. MessageId: ${providerId}`);
     return { providerId };
+  }
+
+  /** Encode a header value as RFC 2047 UTF-8 base64 if it contains non-ASCII */
+  private encodeMimeHeader(value: string): string {
+    if (/[\x80-\xFF]/.test(value) || /[^\x20-\x7E]/.test(value)) {
+      return `=?UTF-8?B?${Buffer.from(value, 'utf-8').toString('base64')}?=`;
+    }
+    return value;
+  }
+
+  /** Simple quoted-printable encoder for HTML content */
+  private encodeQuotedPrintable(text: string): string {
+    // Encode non-ASCII and special chars, wrap at 76 chars per line
+    return text
+      .split('\n')
+      .map(line => {
+        let encoded = '';
+        for (const char of line) {
+          const code = char.charCodeAt(0);
+          if (code > 127 || char === '=') {
+            encoded += `=${code.toString(16).toUpperCase().padStart(2, '0')}`;
+          } else {
+            encoded += char;
+          }
+        }
+        // Soft-wrap at 76 chars
+        const chunks: string[] = [];
+        while (encoded.length > 76) {
+          chunks.push(encoded.slice(0, 76) + '=');
+          encoded = encoded.slice(76);
+        }
+        chunks.push(encoded);
+        return chunks.join('\r\n');
+      })
+      .join('\r\n');
   }
 }
