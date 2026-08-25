@@ -135,6 +135,22 @@ export class TrackingService {
     type: 'Open' | 'Click',
     meta: { country: string | null; url?: string },
   ): Promise<void> {
+    // Debounce rapid duplicate events (e.g. browser link prefetch + user click within 5 seconds)
+    const recentEvent = await this.prisma.event.findFirst({
+      where: {
+        messageId,
+        type,
+        occurredAt: {
+          gte: new Date(Date.now() - 5000),
+        },
+      },
+    });
+
+    if (recentEvent) {
+      this.logger.log(`Debounced duplicate ${type} event for messageId=${messageId} (within 5s window)`);
+      return;
+    }
+
     const payload: Record<string, unknown> = {};
     if (meta.country) payload['country'] = meta.country;
     if (meta.url)     payload['url']     = meta.url;
@@ -150,6 +166,7 @@ export class TrackingService {
     });
     this.logger.log(`Recorded Event(type=${type}) for messageId=${messageId} country=${meta.country ?? 'unknown'}`);
   }
+
 
   // ---------------------------------------------------------------------------
   // HTML rewriting — injected before send

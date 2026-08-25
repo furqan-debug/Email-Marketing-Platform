@@ -94,6 +94,23 @@ export class WebhooksService {
       return { status: 'message_not_found' };
     }
 
+    // Debounce duplicate rapid Open/Click webhook events within 5 seconds
+    if (normalizedType === 'Click' || normalizedType === 'Open') {
+      const recentEvent = await this.prisma.event.findFirst({
+        where: {
+          messageId: message.id,
+          type: normalizedType,
+          occurredAt: {
+            gte: new Date(Date.now() - 5000),
+          },
+        },
+      });
+      if (recentEvent) {
+        this.logger.log(`Debounced duplicate webhook ${normalizedType} event for messageId=${message.id}`);
+        return { status: 'debounced' };
+      }
+    }
+
     const occurredAt = mail.timestamp ? new Date(mail.timestamp) : new Date();
 
     await this.prisma.event.create({
@@ -104,6 +121,7 @@ export class WebhooksService {
         occurredAt,
       },
     });
+
 
     // If prospect replied, automatically mark CampaignLead as REPLIED to stop follow-up sequences
     if (normalizedType === 'Reply') {
