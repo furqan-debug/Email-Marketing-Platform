@@ -57,14 +57,19 @@ export class SesEmailProvider implements EmailProvider {
       headers.push(`X-SES-CONFIGURATION-SET: ${configurationSet}`);
     }
 
+    const base64Body = Buffer.from(message.html, 'utf-8')
+      .toString('base64')
+      .match(/.{1,76}/g)
+      ?.join('\r\n') || '';
+
     const rawMessage = [
       headers.join('\r\n'),
       '',
       `--${boundary}`,
       'Content-Type: text/html; charset=UTF-8',
-      'Content-Transfer-Encoding: quoted-printable',
+      'Content-Transfer-Encoding: base64',
       '',
-      this.encodeQuotedPrintable(message.html),
+      base64Body,
       '',
       `--${boundary}--`,
     ].join('\r\n');
@@ -92,31 +97,5 @@ export class SesEmailProvider implements EmailProvider {
     }
     return value;
   }
-
-  /** Simple quoted-printable encoder for HTML content */
-  private encodeQuotedPrintable(text: string): string {
-    // Encode non-ASCII and special chars, wrap at 76 chars per line
-    return text
-      .split('\n')
-      .map(line => {
-        let encoded = '';
-        for (const char of line) {
-          const code = char.charCodeAt(0);
-          if (code > 127 || char === '=') {
-            encoded += `=${code.toString(16).toUpperCase().padStart(2, '0')}`;
-          } else {
-            encoded += char;
-          }
-        }
-        // Soft-wrap at 76 chars
-        const chunks: string[] = [];
-        while (encoded.length > 76) {
-          chunks.push(encoded.slice(0, 76) + '=');
-          encoded = encoded.slice(76);
-        }
-        chunks.push(encoded);
-        return chunks.join('\r\n');
-      })
-      .join('\r\n');
-  }
 }
+
