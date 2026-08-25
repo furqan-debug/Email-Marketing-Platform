@@ -50,7 +50,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           "id" TEXT NOT NULL PRIMARY KEY,
           "campaignId" TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
           "stepOrder" INTEGER NOT NULL,
-          "delayHours" INTEGER NOT NULL DEFAULT 48,
+          "delayHours" DOUBLE PRECISION NOT NULL DEFAULT 48,
+          "scheduledAt" TIMESTAMP(3),
+          "sendAtTime" TEXT,
           "sendAsReply" BOOLEAN NOT NULL DEFAULT true,
           "subject" TEXT,
           "htmlBody" TEXT NOT NULL,
@@ -58,6 +60,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
           CONSTRAINT "CampaignStep_campaignId_stepOrder_key" UNIQUE ("campaignId", "stepOrder")
         );
+
+        ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "scheduledAt" TIMESTAMP(3);
+        ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "sendAtTime" TEXT;
+
 
         CREATE TABLE IF NOT EXISTS "CampaignLead" (
           "id" TEXT NOT NULL PRIMARY KEY,

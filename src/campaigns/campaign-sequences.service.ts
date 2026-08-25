@@ -14,7 +14,9 @@ import { AnalyticsService } from '../analytics/analytics.service';
 
 export interface SaveStepDto {
   stepOrder: number;
-  delayHours: number;
+  delayHours?: number;
+  scheduledAt?: string | null;
+  sendAtTime?: string | null;
   sendAsReply?: boolean;
   subject?: string;
   htmlBody: string;
@@ -40,6 +42,34 @@ export class CampaignSequencesService {
     private readonly trackingService: TrackingService,
     private readonly analyticsService: AnalyticsService,
   ) {}
+
+  /**
+   * Helper to calculate the nextSendAt date based on custom delay, preferred time of day, or specific calendar date.
+   */
+  public calculateNextSendAt(step: any, baseDate: Date = new Date()): Date {
+    if (step.scheduledAt) {
+      const scheduled = new Date(step.scheduledAt);
+      if (!isNaN(scheduled.getTime())) {
+        return scheduled;
+      }
+    }
+
+    const delayHours = typeof step.delayHours === 'number' ? step.delayHours : 48;
+    const delayMs = Math.max(0, delayHours * 3600000);
+    let targetDate = new Date(baseDate.getTime() + delayMs);
+
+    if (step.sendAtTime && typeof step.sendAtTime === 'string') {
+      const [h, m] = step.sendAtTime.split(':').map(Number);
+      if (!isNaN(h) && !isNaN(m)) {
+        targetDate.setHours(h, m, 0, 0);
+        if (targetDate.getTime() < baseDate.getTime()) {
+          targetDate = new Date(targetDate.getTime() + 24 * 3600000);
+        }
+      }
+    }
+
+    return targetDate;
+  }
 
   /**
    * Saves / updates all steps for a campaign sequence.
@@ -72,7 +102,9 @@ export class CampaignSequencesService {
           data: {
             campaignId,
             stepOrder: i + 1,
-            delayHours: Math.max(0, s.delayHours || 0),
+            delayHours: s.delayHours !== undefined ? Number(s.delayHours) : (i === 0 ? 0 : 48),
+            scheduledAt: s.scheduledAt ? new Date(s.scheduledAt) : null,
+            sendAtTime: s.sendAtTime || null,
             sendAsReply: s.sendAsReply ?? (i > 0),
             subject: s.subject || undefined,
             htmlBody: s.htmlBody || '',
@@ -90,6 +122,7 @@ export class CampaignSequencesService {
       return created;
     });
   }
+
 
   /**
    * Retrieves all steps for a campaign.
@@ -236,7 +269,7 @@ export class CampaignSequencesService {
         // Schedule next step or complete
         const now = new Date();
         if (hasNextStep && step2) {
-          const nextSendAt = new Date(now.getTime() + (step2.delayHours || 48) * 3600000);
+          const nextSendAt = this.calculateNextSendAt(step2, now);
           await this.prisma.campaignLead.update({
             where: { id: lead.id },
             data: {
@@ -248,6 +281,7 @@ export class CampaignSequencesService {
             },
           });
         } else {
+
           await this.prisma.campaignLead.update({
             where: { id: lead.id },
             data: {
@@ -420,7 +454,7 @@ export class CampaignSequencesService {
           const nextStep = campaign.steps.find((s) => s.stepOrder === nextStepOrder);
 
           if (nextStep) {
-            const nextSendAt = new Date(now.getTime() + (nextStep.delayHours || 48) * 3600000);
+            const nextSendAt = this.calculateNextSendAt(nextStep, now);
             await this.prisma.campaignLead.update({
               where: { id: lead.id },
               data: {
@@ -431,6 +465,7 @@ export class CampaignSequencesService {
               },
             });
           } else {
+
             // Sequence finished for this lead!
             await this.prisma.campaignLead.update({
               where: { id: lead.id },

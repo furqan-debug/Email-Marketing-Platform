@@ -64,7 +64,9 @@ model CampaignStep {
   campaignId  String
   campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   stepOrder   Int       // 1, 2, 3...
-  delayHours  Int       @default(48) // e.g. 48 hours (2 days) after previous step
+  delayHours  Float     @default(48) // e.g. 48 hours (2 days), 0.5 (30 mins), etc.
+  scheduledAt DateTime? // Explicit date & time if user selected exact calendar schedule
+  sendAtTime  String?   // Preferred time of day, e.g. "09:00"
   sendAsReply Boolean   @default(true) // Send in same thread (Re: Original Subject)
   subject     String?   // Used only if sendAsReply is false
   htmlBody    String    // Visual composer HTML with merge tags
@@ -73,6 +75,7 @@ model CampaignStep {
 
   @@unique([campaignId, stepOrder])
 }
+
 
 model CampaignLead {
   id            String    @id @default(uuid())
