@@ -139,19 +139,20 @@ model CampaignLead {
  }
 
  model AnalyticsSnapshot {
-   id          String   @id @default(uuid())
-   campaignId  String   @unique
-   campaign    Campaign @relation(fields: [campaignId], references: [id])
-   sent        Int      @default(0)
-   delivered   Int      @default(0)
-   opened      Int      @default(0)   // unique openers (COUNT DISTINCT messageId)
-   clicked     Int      @default(0)   // unique clickers (COUNT DISTINCT messageId)
-   totalOpens  Int      @default(0)   // raw total open events (same message can fire many)
-   totalClicks Int      @default(0)   // raw total click events
-   bounced     Int      @default(0)
-   complained  Int      @default(0)
-   computedAt  DateTime @default(now())
- }
+  id          String   @id @default(uuid())
+  campaignId  String   @unique
+  campaign    Campaign @relation(fields: [campaignId], references: [id])
+  sent        Int      @default(0)
+  delivered   Int      @default(0)
+  opened      Int      @default(0)   // unique openers (COUNT DISTINCT messageId)
+  clicked     Int      @default(0)   // unique clickers (COUNT DISTINCT messageId)
+  totalOpens  Int      @default(0)   // raw total open events (same message can fire many)
+  totalClicks Int      @default(0)   // raw total click events
+  replied     Int      @default(0)   // unique repliers
+  bounced     Int      @default(0)
+  complained  Int      @default(0)
+  computedAt  DateTime @default(now())
+}
 
  model WorkflowExecution {
    id           String   @id @default(uuid())

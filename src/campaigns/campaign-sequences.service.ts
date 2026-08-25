@@ -557,6 +557,57 @@ export class CampaignSequencesService {
     };
   }
 
+  /**
+   * Manually or via webhook marks a lead as REPLIED.
+   * Halts any pending follow-ups, records a Reply event, and updates analytics.
+   */
+  async markLeadReplied(campaignId: string, leadIdOrContactId: string) {
+    const lead = await this.prisma.campaignLead.findFirst({
+      where: {
+        campaignId,
+        OR: [{ id: leadIdOrContactId }, { contactId: leadIdOrContactId }],
+      },
+      include: { contact: true },
+    });
+
+    if (!lead) {
+      throw new NotFoundException(`Lead ${leadIdOrContactId} not found in campaign ${campaignId}`);
+    }
+
+    const updated = await this.prisma.campaignLead.update({
+      where: { id: lead.id },
+      data: {
+        status: 'REPLIED',
+        nextSendAt: null,
+      },
+    });
+
+    // Record a Reply Event if Message exists
+    const lastMessage = await this.prisma.message.findFirst({
+      where: { campaignId, contactId: lead.contactId },
+      orderBy: { stepNumber: 'desc' },
+    });
+
+    if (lastMessage) {
+      await this.prisma.event.create({
+        data: {
+          type: 'Reply',
+          messageId: lastMessage.id,
+          rawPayload: { source: 'markLeadReplied', at: new Date().toISOString() },
+        },
+      });
+    }
+
+    // Refresh analytics snapshot
+    try {
+      await this.analyticsService.computeForCampaign(campaignId);
+    } catch (err: any) {
+      this.logger.warn(`Failed to recompute analytics: ${err?.message}`);
+    }
+
+    return updated;
+  }
+
   // Helper for merge tags
   private renderMergeTags(templateText: string, contact: ContactEntry): string {
     return templateText.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => {

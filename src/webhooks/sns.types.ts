@@ -24,7 +24,8 @@ export interface SnsEnvelope {
  * SES event notification types we handle.
  * https://docs.aws.amazon.com/ses/latest/dg/event-publishing-retrieving-sns-examples.html
  */
-export type SesEventType = 'Send' | 'Delivery' | 'Bounce' | 'Complaint' | 'Open' | 'Click';
+export type SesEventType = 'Send' | 'Delivery' | 'Bounce' | 'Complaint' | 'Open' | 'Click' | 'Reply' | 'Received';
+
 
 export interface SesNotificationMessage {
   eventType: SesEventType;

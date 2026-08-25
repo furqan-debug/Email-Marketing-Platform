@@ -75,15 +75,16 @@ export class WebhooksService {
       return { status: 'skipped' };
     }
 
-    const HANDLED: SesEventType[] = ['Send', 'Delivery', 'Bounce', 'Complaint', 'Open', 'Click'];
+    const HANDLED: SesEventType[] = ['Send', 'Delivery', 'Bounce', 'Complaint', 'Open', 'Click', 'Reply', 'Received'];
     if (!HANDLED.includes(eventType)) {
       this.logger.warn(`Unhandled SES eventType: ${eventType}`);
       return { status: 'unhandled_event_type' };
     }
 
+    // Normalize event type
+    const normalizedType = eventType === 'Received' ? 'Reply' : eventType;
+
     // Look up the Message row by its SES MessageId (stored as Message.id).
-    // If the message hasn't been tracked yet we skip rather than error so
-    // transient ordering issues don't crash the endpoint.
     const message = await this.prisma.message.findUnique({
       where: { id: sesMessageId },
     });
@@ -97,14 +98,36 @@ export class WebhooksService {
 
     await this.prisma.event.create({
       data: {
-        type: eventType,
+        type: normalizedType,
         messageId: message.id,
         rawPayload: sesMessage as unknown as Record<string, unknown>,
         occurredAt,
       },
     });
 
-    this.logger.log(`Created Event(type=${eventType}) for messageId=${message.id}`);
+    // If prospect replied, automatically mark CampaignLead as REPLIED to stop follow-up sequences
+    if (normalizedType === 'Reply') {
+      try {
+        await this.prisma.campaignLead.updateMany({
+          where: {
+            campaignId: message.campaignId,
+            contactId: message.contactId,
+          },
+          data: {
+            status: 'REPLIED',
+            nextSendAt: null,
+          },
+        });
+        this.logger.log(
+          `CampaignLead for contact=${message.contactId} marked as REPLIED — follow-ups halted.`,
+        );
+      } catch (leadErr: any) {
+        this.logger.warn(`Could not update lead to REPLIED: ${leadErr?.message}`);
+      }
+    }
+
+    this.logger.log(`Created Event(type=${normalizedType}) for messageId=${message.id}`);
     return { status: 'ok' };
   }
 }
+

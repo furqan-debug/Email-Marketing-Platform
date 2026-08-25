@@ -8,6 +8,7 @@ interface SnapshotCounts {
   clicked:     number;   // unique clickers
   totalOpens:  number;   // raw total open events
   totalClicks: number;   // raw total click events
+  replied:     number;   // unique repliers
   bounced:     number;
   complained:  number;
 }
@@ -16,6 +17,7 @@ export interface AnalyticsRates {
   deliveryRate:   number;
   openRate:       number;
   clickRate:      number;
+  replyRate:      number;
   bounceRate:     number;
   complaintRate:  number;
 }
@@ -69,10 +71,11 @@ export class AnalyticsService {
           clicked:     snapshot.clicked,
           totalOpens:  (snapshot as any).totalOpens  ?? 0,
           totalClicks: (snapshot as any).totalClicks ?? 0,
+          replied:     (snapshot as any).replied     ?? 0,
           bounced:     snapshot.bounced,
           complained:  snapshot.complained,
         }
-      : { sent: 0, delivered: 0, opened: 0, clicked: 0, totalOpens: 0, totalClicks: 0, bounced: 0, complained: 0 };
+      : { sent: 0, delivered: 0, opened: 0, clicked: 0, totalOpens: 0, totalClicks: 0, replied: 0, bounced: 0, complained: 0 };
 
     const computedAt = snapshot?.computedAt ?? new Date(0);
     const staleWarning = !snapshot || (Date.now() - computedAt.getTime() > STALE_THRESHOLD_MS);
@@ -93,7 +96,7 @@ export class AnalyticsService {
   /**
    * Aggregates all Event rows for a single campaign into a snapshot.
    *
-   * Opens and Clicks use COUNT DISTINCT messageId → unique recipients.
+   * Opens, Clicks, and Replies use COUNT DISTINCT messageId → unique recipients.
    * totalOpens / totalClicks use COUNT(*) → raw event fires.
    * All other event types (Send, Delivery, Bounce, Complaint) are counted
    * with COUNT DISTINCT (one per message by nature).
@@ -119,6 +122,7 @@ export class AnalyticsService {
       sent: 0, delivered: 0,
       opened: 0, clicked: 0,
       totalOpens: 0, totalClicks: 0,
+      replied: 0,
       bounced: 0, complained: 0,
     };
 
@@ -136,9 +140,24 @@ export class AnalyticsService {
           counts.clicked     = unique; // unique clickers
           counts.totalClicks = total;  // raw fires
           break;
+        case 'Reply':
+          counts.replied    = unique; // unique repliers
+          break;
         case 'Bounce':    counts.bounced    = unique; break;
         case 'Complaint': counts.complained = unique; break;
       }
+    }
+
+    // Also factor in sequence leads that were flagged with REPLIED status
+    try {
+      const repliedLeads = await this.prisma.campaignLead.count({
+        where: { campaignId, status: 'REPLIED' },
+      });
+      if (repliedLeads > counts.replied) {
+        counts.replied = repliedLeads;
+      }
+    } catch {
+      // Ignore if sequence tables not yet initialized
     }
 
     const computedAt = new Date();
@@ -154,6 +173,7 @@ export class AnalyticsService {
       `Snapshot for ${campaignId}: sent=${counts.sent} delivered=${counts.delivered} ` +
       `opened=${counts.opened}(unique)/${counts.totalOpens}(total) ` +
       `clicked=${counts.clicked}(unique)/${counts.totalClicks}(total) ` +
+      `replied=${counts.replied} ` +
       `bounced=${counts.bounced} complained=${counts.complained}`,
     );
 
@@ -209,8 +229,10 @@ export class AnalyticsService {
       deliveryRate:  safe(counts.delivered),
       openRate:      safe(counts.opened),
       clickRate:     safe(counts.clicked),
+      replyRate:     safe(counts.replied),
       bounceRate:    safe(counts.bounced),
       complaintRate: safe(counts.complained),
     };
   }
 }
+

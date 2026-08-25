@@ -235,5 +235,44 @@ export class CampaignsController {
 
     return { id, deleted: true };
   }
+
+  /**
+   * POST /campaigns/:id/leads/:leadId/reply
+   * Marks a lead as REPLIED, halts follow-ups, and logs a Reply event.
+   */
+  @Post(':id/leads/:leadId/reply')
+  @HttpCode(200)
+  async markLeadReplied(
+    @Param('id') campaignId: string,
+    @Param('leadId') leadId: string,
+  ) {
+    return this.sequencesService.markLeadReplied(campaignId, leadId);
+  }
+
+  /**
+   * POST /campaigns/:id/reply
+   * General endpoint for inbound reply tracking by email or contactId.
+   */
+  @Post(':id/reply')
+  @HttpCode(200)
+  async markReply(
+    @Param('id') campaignId: string,
+    @Body() body: { email?: string; contactId?: string; leadId?: string },
+  ) {
+    const target = body.leadId || body.contactId;
+    if (target) {
+      return this.sequencesService.markLeadReplied(campaignId, target);
+    }
+    if (body.email) {
+      const contact = await this.prisma.contact.findFirst({
+        where: { email: body.email },
+      });
+      if (contact) {
+        return this.sequencesService.markLeadReplied(campaignId, contact.id);
+      }
+    }
+    throw new BadRequestException('leadId, contactId, or email is required');
+  }
 }
+
 
