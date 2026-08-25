@@ -39,7 +39,47 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit() {
     await (this.client as any).$connect();
+
+    // Auto-sync sequence tables and columns on startup
+    try {
+      await this.pool.query(`
+        ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "isSequence" BOOLEAN NOT NULL DEFAULT false;
+        ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "stepNumber" INTEGER NOT NULL DEFAULT 1;
+
+        CREATE TABLE IF NOT EXISTS "CampaignStep" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "campaignId" TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
+          "stepOrder" INTEGER NOT NULL,
+          "delayHours" INTEGER NOT NULL DEFAULT 48,
+          "sendAsReply" BOOLEAN NOT NULL DEFAULT true,
+          "subject" TEXT,
+          "htmlBody" TEXT NOT NULL,
+          "templateId" TEXT,
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "CampaignStep_campaignId_stepOrder_key" UNIQUE ("campaignId", "stepOrder")
+        );
+
+        CREATE TABLE IF NOT EXISTS "CampaignLead" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "campaignId" TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
+          "contactId" TEXT NOT NULL REFERENCES "Contact"("id") ON DELETE CASCADE,
+          "currentStep" INTEGER NOT NULL DEFAULT 1,
+          "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+          "rootMessageId" TEXT,
+          "lastSentAt" TIMESTAMP(3),
+          "nextSendAt" TIMESTAMP(3),
+          "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "CampaignLead_campaignId_contactId_key" UNIQUE ("campaignId", "contactId")
+        );
+
+        CREATE INDEX IF NOT EXISTS "CampaignLead_status_nextSendAt_idx" ON "CampaignLead"("status", "nextSendAt");
+      `);
+    } catch (err: any) {
+      console.warn('Auto-migration notice in onModuleInit:', err?.message);
+    }
   }
+
 
   async onModuleDestroy() {
     await (this.client as any).$disconnect();
