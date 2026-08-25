@@ -491,7 +491,7 @@ export class CampaignSequencesService {
    * Retrieves summary and lead progression across sequence steps.
    */
   async getSequenceProgress(campaignId: string) {
-    const [steps, leads, statusCounts] = await Promise.all([
+    const [steps, leads, statusCounts, stepEvents] = await Promise.all([
       this.prisma.campaignStep.findMany({
         where: { campaignId },
         orderBy: { stepOrder: 'asc' },
@@ -508,7 +508,31 @@ export class CampaignSequencesService {
         where: { campaignId },
         _count: { id: true },
       }),
+      this.prisma.client.$queryRaw<
+        Array<{ stepNumber: number; type: string; count: bigint }>
+      >`
+        SELECT
+          m."stepNumber",
+          e.type,
+          COUNT(DISTINCT e."messageId") as count
+        FROM "Event" e
+        INNER JOIN "Message" m ON m.id = e."messageId"
+        WHERE m."campaignId" = ${campaignId}
+        GROUP BY m."stepNumber", e.type
+      `,
     ]);
+
+    const stepStatsMap: Record<number, { opens: number; clicks: number; replies: number }> = {};
+    for (const row of stepEvents) {
+      const step = Number(row.stepNumber);
+      if (!stepStatsMap[step]) {
+        stepStatsMap[step] = { opens: 0, clicks: 0, replies: 0 };
+      }
+      const count = Number(row.count);
+      if (row.type === 'Open') stepStatsMap[step].opens = count;
+      if (row.type === 'Click') stepStatsMap[step].clicks = count;
+      if (row.type === 'Reply') stepStatsMap[step].replies = count;
+    }
 
     const stepBreakdown = steps.map((s) => {
       const activeAtStep = leads.filter(
@@ -517,6 +541,7 @@ export class CampaignSequencesService {
       const sentAtStep = leads.filter(
         (l) => l.currentStep > s.stepOrder || (l.currentStep === s.stepOrder && l.lastSentAt !== null),
       ).length;
+      const stats = stepStatsMap[s.stepOrder] || { opens: 0, clicks: 0, replies: 0 };
 
       return {
         stepOrder: s.stepOrder,
@@ -525,8 +550,12 @@ export class CampaignSequencesService {
         subject: s.subject,
         activeAtStep,
         sentAtStep,
+        opensAtStep: stats.opens,
+        clicksAtStep: stats.clicks,
+        repliesAtStep: stats.replies,
       };
     });
+
 
     const statusMap: Record<string, number> = {};
     for (const sc of statusCounts) {

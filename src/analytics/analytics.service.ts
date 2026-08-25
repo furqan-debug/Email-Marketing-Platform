@@ -2,22 +2,25 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 interface SnapshotCounts {
-  sent:        number;
-  delivered:   number;
-  opened:      number;   // unique openers
-  clicked:     number;   // unique clickers
-  totalOpens:  number;   // raw total open events
-  totalClicks: number;   // raw total click events
-  replied:     number;   // unique repliers
-  bounced:     number;
-  complained:  number;
+  sent:         number;
+  delivered:    number;
+  opened:       number;   // unique openers
+  clicked:      number;   // unique clickers
+  totalOpens:   number;   // raw total open events
+  totalClicks:  number;   // raw total click events
+  replied:      number;   // unique repliers
+  unsubscribed: number;   // unique opt-outs
+  bounced:      number;
+  complained:   number;
 }
 
 export interface AnalyticsRates {
   deliveryRate:   number;
   openRate:       number;
   clickRate:      number;
+  ctor:           number;   // Click-to-Open Rate (clicked / opened)
   replyRate:      number;
+  unsubRate:      number;
   bounceRate:     number;
   complaintRate:  number;
 }
@@ -65,17 +68,18 @@ export class AnalyticsService {
 
     const counts: SnapshotCounts = snapshot
       ? {
-          sent:        snapshot.sent,
-          delivered:   snapshot.delivered,
-          opened:      snapshot.opened,
-          clicked:     snapshot.clicked,
-          totalOpens:  (snapshot as any).totalOpens  ?? 0,
-          totalClicks: (snapshot as any).totalClicks ?? 0,
-          replied:     (snapshot as any).replied     ?? 0,
-          bounced:     snapshot.bounced,
-          complained:  snapshot.complained,
+          sent:         snapshot.sent,
+          delivered:    snapshot.delivered,
+          opened:       snapshot.opened,
+          clicked:      snapshot.clicked,
+          totalOpens:   (snapshot as any).totalOpens   ?? 0,
+          totalClicks:  (snapshot as any).totalClicks  ?? 0,
+          replied:      (snapshot as any).replied      ?? 0,
+          unsubscribed: (snapshot as any).unsubscribed ?? 0,
+          bounced:      snapshot.bounced,
+          complained:   snapshot.complained,
         }
-      : { sent: 0, delivered: 0, opened: 0, clicked: 0, totalOpens: 0, totalClicks: 0, replied: 0, bounced: 0, complained: 0 };
+      : { sent: 0, delivered: 0, opened: 0, clicked: 0, totalOpens: 0, totalClicks: 0, replied: 0, unsubscribed: 0, bounced: 0, complained: 0 };
 
     const computedAt = snapshot?.computedAt ?? new Date(0);
     const staleWarning = !snapshot || (Date.now() - computedAt.getTime() > STALE_THRESHOLD_MS);
@@ -98,7 +102,7 @@ export class AnalyticsService {
    *
    * Opens, Clicks, and Replies use COUNT DISTINCT messageId → unique recipients.
    * totalOpens / totalClicks use COUNT(*) → raw event fires.
-   * All other event types (Send, Delivery, Bounce, Complaint) are counted
+   * All other event types (Send, Delivery, Bounce, Complaint, Unsubscribe) are counted
    * with COUNT DISTINCT (one per message by nature).
    *
    * Upserts on campaignId so re-running is safe.
@@ -122,7 +126,7 @@ export class AnalyticsService {
       sent: 0, delivered: 0,
       opened: 0, clicked: 0,
       totalOpens: 0, totalClicks: 0,
-      replied: 0,
+      replied: 0, unsubscribed: 0,
       bounced: 0, complained: 0,
     };
 
@@ -130,8 +134,8 @@ export class AnalyticsService {
       const unique = Number(row.unique_count);
       const total  = Number(row.total_count);
       switch (row.type) {
-        case 'Send':      counts.sent       = unique; break;
-        case 'Delivery':  counts.delivered  = unique; break;
+        case 'Send':        counts.sent         = unique; break;
+        case 'Delivery':    counts.delivered    = unique; break;
         case 'Open':
           counts.opened     = unique; // unique openers
           counts.totalOpens = total;  // raw fires
@@ -141,20 +145,30 @@ export class AnalyticsService {
           counts.totalClicks = total;  // raw fires
           break;
         case 'Reply':
-          counts.replied    = unique; // unique repliers
+          counts.replied     = unique; // unique repliers
           break;
-        case 'Bounce':    counts.bounced    = unique; break;
-        case 'Complaint': counts.complained = unique; break;
+        case 'Unsubscribe':
+          counts.unsubscribed = unique; // unique opt-outs
+          break;
+        case 'Bounce':      counts.bounced      = unique; break;
+        case 'Complaint':   counts.complained   = unique; break;
       }
     }
 
-    // Also factor in sequence leads that were flagged with REPLIED status
+    // Also factor in sequence leads that were flagged with REPLIED or UNSUBSCRIBED status
     try {
       const repliedLeads = await this.prisma.campaignLead.count({
         where: { campaignId, status: 'REPLIED' },
       });
       if (repliedLeads > counts.replied) {
         counts.replied = repliedLeads;
+      }
+
+      const unsubLeads = await this.prisma.campaignLead.count({
+        where: { campaignId, status: 'UNSUBSCRIBED' },
+      });
+      if (unsubLeads > counts.unsubscribed) {
+        counts.unsubscribed = unsubLeads;
       }
     } catch {
       // Ignore if sequence tables not yet initialized
@@ -173,7 +187,7 @@ export class AnalyticsService {
       `Snapshot for ${campaignId}: sent=${counts.sent} delivered=${counts.delivered} ` +
       `opened=${counts.opened}(unique)/${counts.totalOpens}(total) ` +
       `clicked=${counts.clicked}(unique)/${counts.totalClicks}(total) ` +
-      `replied=${counts.replied} ` +
+      `replied=${counts.replied} unsubscribed=${counts.unsubscribed} ` +
       `bounced=${counts.bounced} complained=${counts.complained}`,
     );
 
@@ -184,6 +198,45 @@ export class AnalyticsService {
       computedAt,
       staleWarning: false,
     };
+  }
+
+  /**
+   * Returns recent real-time engagement activity for a campaign.
+   */
+  async getRecentActivity(campaignId: string, limit = 30) {
+    const events = await this.prisma.event.findMany({
+      where: {
+        message: { campaignId },
+      },
+      include: {
+        message: {
+          include: {
+            contact: {
+              select: {
+                id: true,
+                email: true,
+                firstName: true,
+                lastName: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { occurredAt: 'desc' },
+      take: Math.min(100, Math.max(1, limit)),
+    });
+
+    return events.map((e) => ({
+      id: e.id,
+      type: e.type,
+      messageId: e.messageId,
+      stepNumber: e.message.stepNumber ?? 1,
+      contactId: e.message.contactId,
+      contactEmail: e.message.contact.email,
+      contactName: [e.message.contact.firstName, e.message.contact.lastName].filter(Boolean).join(' ') || null,
+      occurredAt: e.occurredAt,
+      country: e.country || null,
+    }));
   }
 
   /**
@@ -222,17 +275,25 @@ export class AnalyticsService {
   // ─────────────────────────────────────────────────────────────────────────────
 
   private computeRates(counts: SnapshotCounts): AnalyticsRates {
-    const base = counts.sent || 1; // guard against divide-by-zero; if sent=0 rates will all be 0
-    const safe = (n: number) => counts.sent === 0 ? 0 : Math.round((n / base) * 10000) / 10000;
+    const sent = counts.sent || 1;
+    const delivered = counts.delivered || sent;
+    const opened = counts.opened || 0;
+
+    const safeSent = (n: number) => counts.sent === 0 ? 0 : Math.round((n / sent) * 10000) / 10000;
+    const safeDelivered = (n: number) => counts.delivered === 0 ? 0 : Math.round((n / delivered) * 10000) / 10000;
+    const safeOpen = (n: number) => opened === 0 ? 0 : Math.round((n / opened) * 10000) / 10000;
 
     return {
-      deliveryRate:  safe(counts.delivered),
-      openRate:      safe(counts.opened),
-      clickRate:     safe(counts.clicked),
-      replyRate:     safe(counts.replied),
-      bounceRate:    safe(counts.bounced),
-      complaintRate: safe(counts.complained),
+      deliveryRate:  safeSent(counts.delivered),
+      openRate:      safeDelivered(counts.opened),
+      clickRate:     safeDelivered(counts.clicked),
+      ctor:          safeOpen(counts.clicked),
+      replyRate:     safeDelivered(counts.replied),
+      unsubRate:     safeDelivered(counts.unsubscribed),
+      bounceRate:    safeSent(counts.bounced),
+      complaintRate: safeSent(counts.complained),
     };
   }
 }
+
 

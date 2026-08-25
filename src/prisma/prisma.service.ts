@@ -64,6 +64,8 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "scheduledAt" TIMESTAMP(3);
         ALTER TABLE "CampaignStep" ADD COLUMN IF NOT EXISTS "sendAtTime" TEXT;
         ALTER TABLE "AnalyticsSnapshot" ADD COLUMN IF NOT EXISTS "replied" INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE "AnalyticsSnapshot" ADD COLUMN IF NOT EXISTS "unsubscribed" INTEGER NOT NULL DEFAULT 0;
+
 
 
 

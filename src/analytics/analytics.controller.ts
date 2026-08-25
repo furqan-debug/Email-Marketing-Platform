@@ -38,4 +38,15 @@ export class AnalyticsController {
   computeSnapshot(@Param('id') id: string): Promise<AnalyticsResult> {
     return this.analyticsService.computeForCampaign(id);
   }
+
+  /**
+   * GET /analytics/campaigns/:id/activity
+   * Returns recent real-time engagement activity for a campaign.
+   */
+  @Get('campaigns/:id/activity')
+  getActivity(@Param('id') id: string) {
+    return this.analyticsService.getRecentActivity(id);
+  }
 }
+
+

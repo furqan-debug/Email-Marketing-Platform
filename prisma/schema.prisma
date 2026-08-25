@@ -149,10 +149,12 @@ model CampaignLead {
   totalOpens  Int      @default(0)   // raw total open events (same message can fire many)
   totalClicks Int      @default(0)   // raw total click events
   replied     Int      @default(0)   // unique repliers
+  unsubscribed Int     @default(0)   // unique unsubscribes
   bounced     Int      @default(0)
   complained  Int      @default(0)
   computedAt  DateTime @default(now())
 }
+
 
  model WorkflowExecution {
    id           String   @id @default(uuid())
