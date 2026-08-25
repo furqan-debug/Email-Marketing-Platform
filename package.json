@@ -7,8 +7,9 @@
   "license": "UNLICENSED",
   "scripts": {
     "postinstall": "prisma generate",
-    "build": "prisma generate && nest build",
+    "build": "prisma generate && prisma db push --accept-data-loss && nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+
     "start": "nest start",
     "prestart:dev": "kill-port 3000 || true",
     "start:dev": "nest start --watch",

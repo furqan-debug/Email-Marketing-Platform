@@ -4,6 +4,7 @@ import { EmailModule } from '../email/email.module';
 import { TrackingModule } from '../tracking/tracking.module';
 import { AnalyticsModule } from '../analytics/analytics.module';
 import { CampaignMessagesService } from './campaign-messages.service';
+import { CampaignSequencesService } from './campaign-sequences.service';
 import { CampaignsController } from './campaigns.controller';
 
 @Module({
@@ -14,7 +15,8 @@ import { CampaignsController } from './campaigns.controller';
     AnalyticsModule,
   ],
   controllers: [CampaignsController],
-  providers: [CampaignMessagesService],
-  exports: [CampaignMessagesService],
+  providers: [CampaignMessagesService, CampaignSequencesService],
+  exports: [CampaignMessagesService, CampaignSequencesService],
 })
 export class CampaignsModule {}
+

@@ -53,9 +53,23 @@ export class SesEmailProvider implements EmailProvider {
       headers.push(`List-Unsubscribe-Post: List-Unsubscribe=One-Click`);
     }
 
+    // Email Threading: In-Reply-To & References
+    if (message.inReplyTo) {
+      const inReplyToFormatted = message.inReplyTo.startsWith('<') && message.inReplyTo.endsWith('>')
+        ? message.inReplyTo
+        : `<${message.inReplyTo}>`;
+      headers.push(`In-Reply-To: ${inReplyToFormatted}`);
+
+      const referencesFormatted = message.references
+        ? (message.references.startsWith('<') && message.references.endsWith('>') ? message.references : `<${message.references}>`)
+        : inReplyToFormatted;
+      headers.push(`References: ${referencesFormatted}`);
+    }
+
     if (configurationSet) {
       headers.push(`X-SES-CONFIGURATION-SET: ${configurationSet}`);
     }
+
 
     const base64Body = Buffer.from(message.html, 'utf-8')
       .toString('base64')

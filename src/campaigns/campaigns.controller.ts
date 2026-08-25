@@ -15,35 +15,44 @@ import {
   CampaignStatusResult,
   GenerateMessagesResult,
 } from './campaign-messages.service';
+import { CampaignSequencesService, SaveStepDto } from './campaign-sequences.service';
 
 @Controller('campaigns')
 export class CampaignsController {
   constructor(
     private readonly campaignMessages: CampaignMessagesService,
+    private readonly sequencesService: CampaignSequencesService,
     private readonly prisma: PrismaService,
   ) {}
 
   /**
    * GET /campaigns
-   * Returns all campaigns with their analytics snapshots.
+   * Returns all campaigns with their analytics snapshots and step counts.
    */
   @Get()
   listCampaigns() {
     return this.prisma.campaign.findMany({
-      include: { snapshot: true },
+      include: {
+        snapshot: true,
+        steps: { select: { id: true, stepOrder: true, delayHours: true } },
+      },
       orderBy: { id: 'desc' },
     });
   }
 
   /**
    * GET /campaigns/:id
-   * Returns a single campaign with its snapshot.
+   * Returns a single campaign with its snapshot, steps, and lead counts.
    */
   @Get(':id')
   async getCampaign(@Param('id') id: string) {
     const campaign = await this.prisma.campaign.findUnique({
       where: { id },
-      include: { snapshot: true },
+      include: {
+        snapshot: true,
+        steps: { orderBy: { stepOrder: 'asc' } },
+        _count: { select: { leads: true, messages: true } },
+      },
     });
     if (!campaign) throw new NotFoundException(`Campaign ${id} not found`);
     return campaign;
@@ -51,13 +60,11 @@ export class CampaignsController {
 
   /**
    * POST /campaigns
-   * Body: { name, audienceId, subject?, fromName?, htmlBody?, templateId? }
-   * Either htmlBody or templateId is required — a campaign with no body cannot be sent.
-   * Creates a new campaign in DRAFT status.
+   * Body: { name, audienceId, subject?, fromName?, htmlBody?, templateId?, isSequence?, steps? }
    */
   @Post()
   @HttpCode(201)
-  createCampaign(
+  async createCampaign(
     @Body()
     body: {
       name: string;
@@ -68,55 +75,103 @@ export class CampaignsController {
       replyTo?: string;
       htmlBody?: string;
       templateId?: string;
+      isSequence?: boolean;
+      steps?: SaveStepDto[];
     },
   ) {
-    if (!body.htmlBody && !body.templateId) {
+    const hasSteps = body.steps && body.steps.length > 0;
+    if (!body.htmlBody && !body.templateId && !hasSteps) {
       throw new BadRequestException(
-        'Either htmlBody or templateId is required — a campaign must have an email body.',
+        'Either htmlBody, templateId, or sequence steps are required — a campaign must have email content.',
       );
     }
-    return this.prisma.campaign.create({
+
+    const campaign = await this.prisma.campaign.create({
       data: {
         name:       body.name,
         audienceId: body.audienceId,
-        subject:    body.subject    ?? null,
+        subject:    body.subject    ?? (hasSteps ? body.steps![0].subject ?? null : null),
         fromName:   body.fromName   ?? null,
         fromEmail:  body.fromEmail  ?? null,
         replyTo:    body.replyTo    ?? null,
-        htmlBody:   body.htmlBody   ?? null,
+        htmlBody:   body.htmlBody   ?? (hasSteps ? body.steps![0].htmlBody ?? null : null),
         templateId: body.templateId ?? null,
+        isSequence: body.isSequence ?? hasSteps,
       },
     });
+
+    if (hasSteps) {
+      await this.sequencesService.saveSteps(campaign.id, body.steps!);
+    }
+
+    return this.getCampaign(campaign.id);
   }
 
+  /**
+   * GET /campaigns/:id/steps
+   */
+  @Get(':id/steps')
+  async getSteps(@Param('id') id: string) {
+    return this.sequencesService.getSteps(id);
+  }
+
+  /**
+   * POST /campaigns/:id/steps
+   */
+  @Post(':id/steps')
+  @HttpCode(200)
+  async saveSteps(
+    @Param('id') id: string,
+    @Body() body: { steps: SaveStepDto[] },
+  ) {
+    return this.sequencesService.saveSteps(id, body.steps);
+  }
+
+  /**
+   * GET /campaigns/:id/sequence-progress
+   */
+  @Get(':id/sequence-progress')
+  async getSequenceProgress(@Param('id') id: string) {
+    return this.sequencesService.getSequenceProgress(id);
+  }
 
   /**
    * POST /campaigns/:id/generate-messages
-   * Generates (and de-duplicates) Message rows for all non-suppressed contacts.
-   * Idempotent — safe to call multiple times.
    */
   @Post(':id/generate-messages')
   @HttpCode(200)
-  generateMessages(@Param('id') id: string): Promise<GenerateMessagesResult> {
+  async generateMessages(@Param('id') id: string): Promise<GenerateMessagesResult> {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      select: { isSequence: true },
+    });
+    if (campaign?.isSequence) {
+      return { created: 0, suppressed: 0, skipped: 0 };
+    }
     return this.campaignMessages.generateMessages(id);
   }
 
   /**
    * POST /campaigns/:id/send
-   * Sets campaign status → SENDING and fire-and-forgets the dispatch loop.
-   * Returns immediately with { id, status: 'SENDING' }.
    */
   @Post(':id/send')
   @HttpCode(200)
-  send(@Param('id') id: string): Promise<CampaignStatusResult> {
+  async send(@Param('id') id: string): Promise<CampaignStatusResult> {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id },
+      select: { isSequence: true, steps: { select: { id: true } } },
+    });
+
+    if (campaign?.isSequence || (campaign?.steps && campaign.steps.length > 0)) {
+      await this.sequencesService.startSequence(id);
+      return { id, status: 'SENDING' };
+    }
+
     return this.campaignMessages.startSending(id);
   }
 
   /**
    * POST /campaigns/:id/pause
-   * Stops the dispatch loop after the current in-flight enqueue completes.
-   * Messages already in the BullMQ queue are NOT affected — they will still send.
-   * Requires current status to be SENDING.
    */
   @Post(':id/pause')
   @HttpCode(200)
@@ -126,8 +181,6 @@ export class CampaignsController {
 
   /**
    * POST /campaigns/:id/resume
-   * Re-triggers the dispatch loop for all messages with enqueuedAt = null.
-   * Requires current status to be PAUSED.
    */
   @Post(':id/resume')
   @HttpCode(200)
@@ -137,8 +190,6 @@ export class CampaignsController {
 
   /**
    * POST /campaigns/:id/cancel
-   * Permanently stops future generation and enqueueing.
-   * Messages already in BullMQ will still be sent — cancel does not drain the queue.
    */
   @Post(':id/cancel')
   @HttpCode(200)
@@ -148,7 +199,6 @@ export class CampaignsController {
 
   /**
    * DELETE /campaigns/:id
-   * Permanently deletes campaign, its messages, tracking events, and analytics snapshot.
    */
   @Delete(':id')
   @HttpCode(200)
@@ -160,13 +210,19 @@ export class CampaignsController {
       where: { campaignId: id },
       select: { id: true },
     });
-    const messageIds = messages.map(m => m.id);
+    const messageIds = messages.map((m) => m.id);
 
     await this.prisma.$transaction([
       this.prisma.event.deleteMany({
         where: { messageId: { in: messageIds } },
       }),
       this.prisma.message.deleteMany({
+        where: { campaignId: id },
+      }),
+      this.prisma.campaignLead.deleteMany({
+        where: { campaignId: id },
+      }),
+      this.prisma.campaignStep.deleteMany({
         where: { campaignId: id },
       }),
       this.prisma.analyticsSnapshot.deleteMany({
@@ -180,3 +236,4 @@ export class CampaignsController {
     return { id, deleted: true };
   }
 }
+
