@@ -438,23 +438,30 @@ export class CampaignSequencesService {
           const personalSubject = this.renderMergeTags(emailSubject, contact);
           let personalHtml = this.renderMergeTags(currentStep.htmlBody || '', contact);
 
-          // Create/upsert Message record for analytics
-          const msg = await this.prisma.message.upsert({
+          // Safe message record lookup/creation
+          let msg = await this.prisma.message.findFirst({
             where: {
-              campaignId_contactId_stepNumber: {
-                campaignId: campaign.id,
-                contactId: contact.id,
-                stepNumber: currentStepOrder,
-              },
-            },
-            update: { enqueuedAt: now },
-            create: {
               campaignId: campaign.id,
               contactId: contact.id,
               stepNumber: currentStepOrder,
-              enqueuedAt: now,
             },
           });
+          if (!msg) {
+            msg = await this.prisma.message.create({
+              data: {
+                campaignId: campaign.id,
+                contactId: contact.id,
+                stepNumber: currentStepOrder,
+                enqueuedAt: now,
+              },
+            });
+          } else {
+            await this.prisma.message.update({
+              where: { id: msg.id },
+              data: { enqueuedAt: now },
+            });
+          }
+
 
           const unsubToken = this.trackingService.generateToken(msg.id);
           const unsubUrl = `${baseUrl}/t/unsub/${unsubToken}`;

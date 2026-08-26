@@ -7,6 +7,7 @@ import {
   HttpCode,
   NotFoundException,
   Param,
+  Patch,
   Post,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
@@ -57,6 +58,56 @@ export class CampaignsController {
     if (!campaign) throw new NotFoundException(`Campaign ${id} not found`);
     return campaign;
   }
+
+  /**
+   * PATCH /campaigns/:id
+   * Update campaign details, sender info, tracking settings, or sequence steps.
+   */
+  @Patch(':id')
+  async updateCampaign(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      subject?: string;
+      fromName?: string;
+      fromEmail?: string;
+      replyTo?: string;
+      htmlBody?: string;
+      templateId?: string;
+      trackOpens?: boolean;
+      steps?: SaveStepDto[];
+    },
+  ) {
+    const existing = await this.prisma.campaign.findUnique({
+      where: { id },
+    });
+    if (!existing) throw new NotFoundException(`Campaign ${id} not found`);
+
+    const updateData: any = {};
+    if (body.name !== undefined) updateData.name = body.name;
+    if (body.subject !== undefined) updateData.subject = body.subject;
+    if (body.fromName !== undefined) updateData.fromName = body.fromName;
+    if (body.fromEmail !== undefined) updateData.fromEmail = body.fromEmail;
+    if (body.replyTo !== undefined) updateData.replyTo = body.replyTo;
+    if (body.htmlBody !== undefined) updateData.htmlBody = body.htmlBody;
+    if (body.templateId !== undefined) updateData.templateId = body.templateId;
+    if (body.trackOpens !== undefined) updateData.trackOpens = body.trackOpens;
+
+    if (Object.keys(updateData).length > 0) {
+      await this.prisma.campaign.update({
+        where: { id },
+        data: updateData,
+      });
+    }
+
+    if (body.steps && body.steps.length > 0) {
+      await this.sequencesService.saveSteps(id, body.steps);
+    }
+
+    return this.getCampaign(id);
+  }
+
 
   /**
    * POST /campaigns
