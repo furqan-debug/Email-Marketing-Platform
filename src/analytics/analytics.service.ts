@@ -170,11 +170,23 @@ export class AnalyticsService {
       if (unsubLeads > counts.unsubscribed) {
         counts.unsubscribed = unsubLeads;
       }
+
+      // Factor in dispatched messages from Message table
+      const enqueuedCount = await this.prisma.message.count({
+        where: { campaignId, enqueuedAt: { not: null } },
+      });
+      if (enqueuedCount > counts.sent) {
+        counts.sent = enqueuedCount;
+        if (counts.delivered < (enqueuedCount - counts.bounced)) {
+          counts.delivered = Math.max(0, enqueuedCount - counts.bounced);
+        }
+      }
     } catch {
       // Ignore if sequence tables not yet initialized
     }
 
     const computedAt = new Date();
+
 
     // Upsert — safe to run multiple times
     await this.prisma.analyticsSnapshot.upsert({
