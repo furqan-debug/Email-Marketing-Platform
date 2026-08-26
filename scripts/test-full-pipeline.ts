@@ -1,104 +1,41 @@
-import 'dotenv/config';
 import { Pool } from 'pg';
-import { PrismaPg } from '@prisma/adapter-pg';
-import { PrismaClient } from '../prisma/generated/client/client';
-import { Queue, QueueEvents } from 'bullmq';
+
+const connectionString = 'postgresql://postgres:9NqG09MbhvGfO19J3c8U@email-marketing-db.czw64sc8i7l0.us-east-2.rds.amazonaws.com:5432/email_marketing_prod';
 
 async function run() {
-  console.log('🚀 Starting Full Send Pipeline Test...\n');
+  const pool = new Pool({
+    connectionString,
+    ssl: { rejectUnauthorized: false }
+  });
 
-  // 1. Initialize Prisma with Postgres adapter
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) {
-    throw new Error('DATABASE_URL is required in .env');
-  }
+  const campaignId = 'db3480ec-a44c-42b2-8474-66452738cc16';
 
-  const pool = new Pool({ connectionString });
-  const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter } as any);
+  console.log('--- CAMPAIGN ---');
+  const camp = await pool.query('SELECT * FROM "Campaign" WHERE id = $1', [campaignId]);
+  console.log(camp.rows[0]);
 
-  try {
-    // 2. Create Workspace -> Audience -> Contact & Campaign -> Message
-    const workspace = await (prisma as any).workspace.create({
-      data: { name: 'Pipeline Test Workspace' },
-    });
-    console.log(`✅ Created Workspace: ${workspace.id}`);
+  console.log('\n--- STEPS ---');
+  const steps = await pool.query('SELECT * FROM "CampaignStep" WHERE "campaignId" = $1 ORDER BY "stepOrder" ASC', [campaignId]);
+  console.log(steps.rows);
 
-    const audience = await (prisma as any).audience.create({
-      data: {
-        name: 'Pipeline Test Audience',
-        workspaceId: workspace.id,
-      },
-    });
-    console.log(`✅ Created Audience: ${audience.id}`);
+  console.log('\n--- LEADS STATUS ---');
+  const leads = await pool.query('SELECT status, count(*) FROM "CampaignLead" WHERE "campaignId" = $1 GROUP BY status', [campaignId]);
+  console.log(leads.rows);
 
-    const recipientEmail = process.env.AWS_SES_TEST_RECIPIENT || 'developer@digireps.co';
-    const contact = await (prisma as any).contact.create({
-      data: {
-        email: recipientEmail,
-        audienceId: audience.id,
-      },
-    });
-    console.log(`✅ Created Contact: ${contact.id} (${contact.email})`);
+  console.log('\n--- MESSAGES ---');
+  const msgs = await pool.query('SELECT count(*) FROM "Message" WHERE "campaignId" = $1', [campaignId]);
+  console.log('Total Message rows:', msgs.rows[0]);
 
-    const campaign = await (prisma as any).campaign.create({
-      data: {
-        name: 'Pipeline Test Campaign',
-        audienceId: audience.id,
-      },
-    });
-    console.log(`✅ Created Campaign: ${campaign.id}`);
+  console.log('\n--- CONSTRAINTS ON Message ---');
+  const constraints = await pool.query(`
+    SELECT conname, pg_get_constraintdef(c.oid)
+    FROM pg_constraint c
+    JOIN pg_class t ON c.conrelid = t.oid
+    WHERE t.relname = 'Message';
+  `);
+  console.log(constraints.rows);
 
-    const initialMessage = await (prisma as any).message.create({
-      data: {
-        campaignId: campaign.id,
-        contactId: contact.id,
-      },
-    });
-    console.log(`\n📬 Created Message in DB with initial ID: ${initialMessage.id}`);
-
-    // 3. Connect to BullMQ Queue & QueueEvents
-    const connection = { host: 'localhost', port: 6379 };
-    const emailQueue = new Queue('email', { connection });
-    const queueEvents = new QueueEvents('email', { connection });
-
-    // 4. Enqueue Job
-    console.log(`⏳ Enqueuing job to BullMQ 'email' queue...`);
-    const job = await emailQueue.add('send', {
-      to: contact.email,
-      subject: 'Full Send Pipeline Test',
-      html: '<p>Testing full pipeline: Workspace -> Audience -> Contact & Campaign -> Message -> Worker -> SES -> Webhook!</p>',
-      messageId: initialMessage.id,
-    });
-
-    console.log(`📋 Enqueued Job ID: ${job.id}`);
-
-    // 5. Wait for Worker to process job
-    console.log(`⏳ Waiting for worker to process job...`);
-    const result = await job.waitUntilFinished(queueEvents);
-
-    console.log(`\n🎉 Worker Finished Processing Job!`);
-    console.log(`   - Initial Message DB ID : ${initialMessage.id}`);
-    console.log(`   - Returned SES MessageId: ${result.providerId}`);
-
-    // 6. Verify Message row ID in DB
-    const updatedMessage = await (prisma as any).message.findUnique({
-      where: { id: result.providerId },
-    });
-
-    if (updatedMessage) {
-      console.log(`\n✅ Verified Message ID in DB updated to SES MessageId: ${updatedMessage.id}`);
-      console.log(`   Webhooks will now successfully match incoming SES events (Delivery, Bounce, Open, Click) to this Message!`);
-    } else {
-      console.log(`\n⚠️ Message with ID ${result.providerId} not found in DB.`);
-    }
-
-    await emailQueue.close();
-    await queueEvents.close();
-  } finally {
-    await (prisma as any).$disconnect?.();
-    await pool.end();
-  }
+  pool.end();
 }
 
 run().catch((err) => {

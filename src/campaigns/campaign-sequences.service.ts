@@ -179,6 +179,35 @@ export class CampaignSequencesService {
       data: { status: 'SENDING', isSequence: true },
     });
 
+    this.logger.log(
+      `Starting sequence for campaign ${campaignId}: ${activeContacts.length} active leads to process at Step 1`,
+    );
+
+    // Launch dispatch in background so HTTP response is instant
+    setImmediate(async () => {
+      try {
+        await this.dispatchStep1(campaignId, activeContacts);
+      } catch (err: any) {
+        this.logger.error(`Error in dispatchStep1 for campaign ${campaignId}: ${err?.message ?? err}`);
+      }
+    });
+
+    return { campaignId, status: 'SENDING', leadsCount: activeContacts.length };
+  }
+
+  /**
+   * Background dispatcher for Step 1 of a sequence campaign.
+   */
+  private async dispatchStep1(campaignId: string, activeContacts: any[]) {
+    const campaign = await this.prisma.campaign.findUnique({
+      where: { id: campaignId },
+      include: {
+        steps: { orderBy: { stepOrder: 'asc' } },
+      },
+    });
+
+    if (!campaign || campaign.steps.length === 0) return;
+
     const step1 = campaign.steps[0];
     const step2 = campaign.steps.find((s) => s.stepOrder === 2);
     const hasNextStep = !!step2;
@@ -193,13 +222,19 @@ export class CampaignSequencesService {
       ? [(campaign as any).replyTo.trim()]
       : [senderEmail];
 
-    this.logger.log(
-      `Starting sequence for campaign ${campaignId}: ${activeContacts.length} active leads to process at Step 1`,
-    );
-
     // Process Step 1 for each active contact
     for (const contact of activeContacts) {
       try {
+        // Check if campaign was paused/cancelled mid-loop
+        const currentCamp = await this.prisma.campaign.findUnique({
+          where: { id: campaignId },
+          select: { status: true },
+        });
+        if (currentCamp?.status === 'PAUSED' || currentCamp?.status === 'CANCELLED') {
+          this.logger.log(`Campaign ${campaignId} was paused/cancelled — halting Step 1 dispatch.`);
+          break;
+        }
+
         // Upsert CampaignLead
         const lead = await this.prisma.campaignLead.upsert({
           where: {
@@ -214,28 +249,35 @@ export class CampaignSequencesService {
           },
         });
 
+        // Safe message record lookup/creation (avoid ON CONFLICT constraint mismatch)
+        let msg = await this.prisma.message.findFirst({
+          where: {
+            campaignId,
+            contactId: contact.id,
+            stepNumber: 1,
+          },
+        });
+
+        if (!msg) {
+          msg = await this.prisma.message.create({
+            data: {
+              campaignId,
+              contactId: contact.id,
+              stepNumber: 1,
+              enqueuedAt: new Date(),
+            },
+          });
+        } else {
+          await this.prisma.message.update({
+            where: { id: msg.id },
+            data: { enqueuedAt: new Date() },
+          });
+        }
+
         // Render Step 1
         const rawSubject = step1.subject || campaign.subject || campaign.name;
         const personalSubject = this.renderMergeTags(rawSubject, contact);
         let personalHtml = this.renderMergeTags(step1.htmlBody || campaign.htmlBody || '', contact);
-
-        // Generate Message record for tracking
-        const msg = await this.prisma.message.upsert({
-          where: {
-            campaignId_contactId_stepNumber: {
-              campaignId,
-              contactId: contact.id,
-              stepNumber: 1,
-            },
-          },
-          update: { enqueuedAt: new Date() },
-          create: {
-            campaignId,
-            contactId: contact.id,
-            stepNumber: 1,
-            enqueuedAt: new Date(),
-          },
-        });
 
         const unsubToken = this.trackingService.generateToken(msg.id);
         const unsubUrl = `${baseUrl}/t/unsub/${unsubToken}`;
@@ -281,7 +323,6 @@ export class CampaignSequencesService {
             },
           });
         } else {
-
           await this.prisma.campaignLead.update({
             where: { id: lead.id },
             data: {
@@ -292,8 +333,11 @@ export class CampaignSequencesService {
             },
           });
         }
+
+        // Small delay (50ms) to respect SES rate limit
+        await new Promise((resolve) => setTimeout(resolve, 50));
       } catch (err: any) {
-        this.logger.error(`Failed to dispatch Step 1 for contact ${contact.email}: ${err?.message}`);
+        this.logger.error(`Failed to dispatch Step 1 for contact ${contact.email}: ${err?.message ?? err}`);
       }
     }
 
@@ -301,11 +345,10 @@ export class CampaignSequencesService {
     try {
       await this.analyticsService.computeForCampaign(campaignId);
     } catch {}
-
-    return { campaignId, status: 'SENDING', leadsCount: activeContacts.length };
   }
 
   /**
+
    * Background Cron: Runs every 2 minutes to check and dispatch due follow-up steps.
    */
   @Cron('*/2 * * * *')

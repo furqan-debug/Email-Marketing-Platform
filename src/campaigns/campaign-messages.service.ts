@@ -168,6 +168,13 @@ export class CampaignMessagesService {
       return;
     }
 
+    // If campaign is a sequence, sequence dispatcher handles leads dynamically — do not overwrite status to COMPLETED
+    if ((campaign as any).isSequence) {
+      this.logger.log(`Campaign ${campaignId} is a sequence — handled by sequence engine.`);
+      return;
+    }
+
+
     // Resolve base HTML body: templateId wins over htmlBody
     const baseHtml = campaign.template?.html ?? campaign.htmlBody;
     if (!baseHtml) {

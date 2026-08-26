@@ -46,6 +46,16 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "isSequence" BOOLEAN NOT NULL DEFAULT false;
         ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "stepNumber" INTEGER NOT NULL DEFAULT 1;
 
+        DO $$
+        BEGIN
+          IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Message_campaignId_contactId_key') THEN
+            ALTER TABLE "Message" DROP CONSTRAINT "Message_campaignId_contactId_key";
+          END IF;
+          IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'Message_campaignId_contactId_stepNumber_key') AND NOT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = 'Message_campaignId_contactId_stepNumber_key') THEN
+            CREATE UNIQUE INDEX "Message_campaignId_contactId_stepNumber_key" ON "Message"("campaignId", "contactId", "stepNumber");
+          END IF;
+        END $$;
+
         CREATE TABLE IF NOT EXISTS "CampaignStep" (
           "id" TEXT NOT NULL PRIMARY KEY,
           "campaignId" TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
@@ -66,9 +76,6 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         ALTER TABLE "AnalyticsSnapshot" ADD COLUMN IF NOT EXISTS "replied" INTEGER NOT NULL DEFAULT 0;
         ALTER TABLE "AnalyticsSnapshot" ADD COLUMN IF NOT EXISTS "unsubscribed" INTEGER NOT NULL DEFAULT 0;
 
-
-
-
         CREATE TABLE IF NOT EXISTS "CampaignLead" (
           "id" TEXT NOT NULL PRIMARY KEY,
           "campaignId" TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
@@ -88,6 +95,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       console.warn('Auto-migration notice in onModuleInit:', err?.message);
     }
+
   }
 
 
