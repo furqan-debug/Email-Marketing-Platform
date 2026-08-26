@@ -300,10 +300,13 @@ export class CampaignMessagesService {
       // 3. Inject tracking pixel + wrap links
       try {
         await this.trackingService.saveToken(msgId, unsubToken);
-        html = this.trackingService.wrapHtml(html, unsubToken, baseUrl);
+        html = this.trackingService.wrapHtml(html, unsubToken, baseUrl, {
+          trackOpens: (campaign as any).trackOpens ?? true,
+        });
       } catch (trackErr: any) {
         this.logger.warn(`Tracking setup failed (continuing): ${trackErr?.message ?? trackErr}`);
       }
+
 
       // Resolve custom from and reply-to
       const defaultFromAddress = process.env.AWS_SES_FROM_ADDRESS || 'noreply@digireps.org';

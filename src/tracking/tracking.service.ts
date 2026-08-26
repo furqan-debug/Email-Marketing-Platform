@@ -174,30 +174,47 @@ export class TrackingService {
 
   /**
    * Rewrite an HTML email body:
-   * 1. Append a 1×1 tracking pixel before </body>.
-   * 2. Wrap each <a href="..."> with the click-redirect URL.
+   * 1. Append a 1×1 tracking pixel before </body> (if trackOpens is enabled).
+   * 2. Wrap each <a href="..."> with the click-redirect URL (if trackClicks is enabled).
    *
    * Call this BEFORE handing the HTML to SES.
    */
-  wrapHtml(html: string, token: string, baseUrl: string): string {
-    const pixelUrl = `${baseUrl}/t/o/${token}`;
-    const pixel = `<img src="${pixelUrl}" width="1" height="1" alt="" style="display:none;border:0;" />`;
+  wrapHtml(
+    html: string,
+    token: string,
+    baseUrl: string,
+    options: { trackOpens?: boolean; trackClicks?: boolean } = { trackOpens: true, trackClicks: true },
+  ): string {
+    const trackOpens = options.trackOpens ?? true;
+    const trackClicks = options.trackClicks ?? true;
 
-    // Wrap links — replace href="..." with redirect URL
-    const wrapped = html.replace(
-      /href="(https?:\/\/[^"]+)"/gi,
-      (_match, url: string) => {
-        const encoded = encodeURIComponent(url);
-        return `href="${baseUrl}/t/c/${token}?url=${encoded}"`;
-      },
-    );
+    let wrapped = html;
 
-    // Inject pixel before </body> (or append if no </body>)
-    if (/<\/body>/i.test(wrapped)) {
-      return wrapped.replace(/<\/body>/i, `${pixel}</body>`);
+    if (trackClicks) {
+      // Wrap links — replace href="..." with redirect URL
+      wrapped = wrapped.replace(
+        /href="(https?:\/\/[^"]+)"/gi,
+        (_match, url: string) => {
+          const encoded = encodeURIComponent(url);
+          return `href="${baseUrl}/t/c/${token}?url=${encoded}"`;
+        },
+      );
     }
-    return wrapped + pixel;
+
+    if (trackOpens) {
+      const pixelUrl = `${baseUrl}/t/o/${token}`;
+      const pixel = `<img src="${pixelUrl}" width="1" height="1" alt="" style="display:none;border:0;" />`;
+
+      // Inject pixel before </body> (or append if no </body>)
+      if (/<\/body>/i.test(wrapped)) {
+        return wrapped.replace(/<\/body>/i, `${pixel}</body>`);
+      }
+      return wrapped + pixel;
+    }
+
+    return wrapped;
   }
+
 
   // ---------------------------------------------------------------------------
   // Domain allowlist validation (for click redirect safety)

@@ -76,6 +76,7 @@ export class CampaignsController {
       htmlBody?: string;
       templateId?: string;
       isSequence?: boolean;
+      trackOpens?: boolean;
       steps?: SaveStepDto[];
     },
   ) {
@@ -97,8 +98,10 @@ export class CampaignsController {
         htmlBody:   body.htmlBody   ?? (hasSteps ? body.steps![0].htmlBody ?? null : null),
         templateId: body.templateId ?? null,
         isSequence: body.isSequence ?? hasSteps,
+        trackOpens: body.trackOpens ?? true,
       },
     });
+
 
     if (hasSteps) {
       await this.sequencesService.saveSteps(campaign.id, body.steps!);
