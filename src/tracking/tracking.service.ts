@@ -199,7 +199,11 @@ export class TrackingService {
           return `href="${baseUrl}/t/c/${token}?url=${encoded}"`;
         },
       );
+    } else {
+      // Prevent Amazon SES from rewriting links to awstrack.me
+      wrapped = wrapped.replace(/<a\s+(?!.*?ses:no-track)/gi, '<a ses:no-track ');
     }
+
 
     if (trackOpens) {
       const pixelUrl = `${baseUrl}/t/o/${token}`;

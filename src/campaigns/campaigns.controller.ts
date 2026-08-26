@@ -76,6 +76,7 @@ export class CampaignsController {
       htmlBody?: string;
       templateId?: string;
       trackOpens?: boolean;
+      trackClicks?: boolean;
       steps?: SaveStepDto[];
     },
   ) {
@@ -93,6 +94,7 @@ export class CampaignsController {
     if (body.htmlBody !== undefined) updateData.htmlBody = body.htmlBody;
     if (body.templateId !== undefined) updateData.templateId = body.templateId;
     if (body.trackOpens !== undefined) updateData.trackOpens = body.trackOpens;
+    if (body.trackClicks !== undefined) updateData.trackClicks = body.trackClicks;
 
     if (Object.keys(updateData).length > 0) {
       await this.prisma.campaign.update({
@@ -107,7 +109,6 @@ export class CampaignsController {
 
     return this.getCampaign(id);
   }
-
 
   /**
    * POST /campaigns
@@ -128,6 +129,7 @@ export class CampaignsController {
       templateId?: string;
       isSequence?: boolean;
       trackOpens?: boolean;
+      trackClicks?: boolean;
       steps?: SaveStepDto[];
     },
   ) {
@@ -150,8 +152,10 @@ export class CampaignsController {
         templateId: body.templateId ?? null,
         isSequence: body.isSequence ?? hasSteps,
         trackOpens: body.trackOpens ?? true,
+        trackClicks: body.trackClicks ?? true,
       },
     });
+
 
 
     if (hasSteps) {

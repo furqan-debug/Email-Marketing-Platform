@@ -293,10 +293,12 @@ export class CampaignSequencesService {
           await this.trackingService.saveToken(msg.id, unsubToken);
           personalHtml = this.trackingService.wrapHtml(personalHtml, unsubToken, baseUrl, {
             trackOpens: (campaign as any).trackOpens ?? true,
+            trackClicks: (campaign as any).trackClicks ?? true,
           });
         } catch (tErr: any) {
           this.logger.warn(`Tracking token save error: ${tErr?.message}`);
         }
+
 
 
         // Dispatch email via SES
@@ -477,8 +479,10 @@ export class CampaignSequencesService {
             await this.trackingService.saveToken(msg.id, unsubToken);
             personalHtml = this.trackingService.wrapHtml(personalHtml, unsubToken, baseUrl, {
               trackOpens: (campaign as any).trackOpens ?? true,
+              trackClicks: (campaign as any).trackClicks ?? true,
             });
           } catch {}
+
 
 
           const senderEmail = (campaign as any).fromEmail?.trim() || defaultFrom;

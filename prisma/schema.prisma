@@ -52,6 +52,7 @@ generator client {
   status     String             @default("DRAFT")
   isSequence Boolean            @default(false)
   trackOpens Boolean            @default(true)
+  trackClicks Boolean           @default(true)
   audienceId String
   audience   Audience           @relation(fields: [audienceId], references: [id])
   steps      CampaignStep[]
@@ -59,6 +60,7 @@ generator client {
   messages   Message[]
   snapshot   AnalyticsSnapshot?
 }
+
 
 
 model CampaignStep {

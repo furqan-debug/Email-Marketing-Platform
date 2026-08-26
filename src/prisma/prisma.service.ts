@@ -45,7 +45,9 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       await this.pool.query(`
         ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "isSequence" BOOLEAN NOT NULL DEFAULT false;
         ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "trackOpens" BOOLEAN NOT NULL DEFAULT true;
+        ALTER TABLE "Campaign" ADD COLUMN IF NOT EXISTS "trackClicks" BOOLEAN NOT NULL DEFAULT true;
         ALTER TABLE "Message" ADD COLUMN IF NOT EXISTS "stepNumber" INTEGER NOT NULL DEFAULT 1;
+
 
 
         DO $$

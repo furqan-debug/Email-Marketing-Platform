@@ -302,10 +302,12 @@ export class CampaignMessagesService {
         await this.trackingService.saveToken(msgId, unsubToken);
         html = this.trackingService.wrapHtml(html, unsubToken, baseUrl, {
           trackOpens: (campaign as any).trackOpens ?? true,
+          trackClicks: (campaign as any).trackClicks ?? true,
         });
       } catch (trackErr: any) {
         this.logger.warn(`Tracking setup failed (continuing): ${trackErr?.message ?? trackErr}`);
       }
+
 
 
       // Resolve custom from and reply-to
