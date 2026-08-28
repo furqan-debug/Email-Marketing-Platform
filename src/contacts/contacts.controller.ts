@@ -58,8 +58,9 @@ export class ContactsController {
       throw new BadRequestException('audienceId query parameter is required');
     }
     const page  = Math.max(1, parseInt(pageStr  || '1',  10) || 1);
-    const limit = Math.min(200, Math.max(1, parseInt(limitStr || '50', 10) || 50));
+    const limit = Math.min(10000, Math.max(1, parseInt(limitStr || '50', 10) || 50));
     const skip  = (page - 1) * limit;
+
 
     const [data, total] = await Promise.all([
       this.prisma.contact.findMany({
