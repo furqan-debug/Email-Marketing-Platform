@@ -540,11 +540,33 @@ export class CampaignSequencesService {
           this.logger.error(`Failed to process follow-up lead ${lead.id}: ${leadErr?.message}`);
         }
       }
+
+      // Automatically transition any campaigns with 0 pending leads to COMPLETED
+      const activeCampaigns = await this.prisma.campaign.findMany({
+        where: { status: 'SENDING', isSequence: true },
+        include: { leads: { select: { status: true } } },
+      });
+
+      for (const camp of activeCampaigns) {
+        if (camp.leads.length > 0) {
+          const hasPending = camp.leads.some(
+            (l) => l.status === 'ACTIVE' || l.status === 'WAITING_DELAY',
+          );
+          if (!hasPending) {
+            await this.prisma.campaign.update({
+              where: { id: camp.id },
+              data: { status: 'COMPLETED' },
+            });
+            this.logger.log(`Campaign ${camp.name} (${camp.id}) completed — all sequence steps finished.`);
+          }
+        }
+      }
     } catch (cronErr: any) {
       this.logger.error(`processDueFollowups error: ${cronErr?.message}`);
     } finally {
       this.isProcessingCron = false;
     }
+
   }
 
   /**
@@ -622,7 +644,22 @@ export class CampaignSequencesService {
       statusMap[sc.status] = sc._count.id;
     }
 
+    const activeWaiting = (statusMap['ACTIVE'] || 0) + (statusMap['WAITING_DELAY'] || 0);
+    if (leads.length > 0 && activeWaiting === 0) {
+      const camp = await this.prisma.campaign.findUnique({
+        where: { id: campaignId },
+        select: { status: true },
+      });
+      if (camp && camp.status === 'SENDING') {
+        await this.prisma.campaign.update({
+          where: { id: campaignId },
+          data: { status: 'COMPLETED' },
+        });
+      }
+    }
+
     return {
+
       totalLeads: leads.length,
       steps: stepBreakdown,
       statusCounts: {

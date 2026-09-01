@@ -77,8 +77,10 @@ export class CampaignsController {
       templateId?: string;
       trackOpens?: boolean;
       trackClicks?: boolean;
+      status?: string;
       steps?: SaveStepDto[];
     },
+
   ) {
     const existing = await this.prisma.campaign.findUnique({
       where: { id },
@@ -95,6 +97,8 @@ export class CampaignsController {
     if (body.templateId !== undefined) updateData.templateId = body.templateId;
     if (body.trackOpens !== undefined) updateData.trackOpens = body.trackOpens;
     if (body.trackClicks !== undefined) updateData.trackClicks = body.trackClicks;
+    if (body.status !== undefined) updateData.status = body.status;
+
 
     if (Object.keys(updateData).length > 0) {
       await this.prisma.campaign.update({
