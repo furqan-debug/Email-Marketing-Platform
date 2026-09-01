@@ -69,12 +69,14 @@ export class CampaignsController {
     @Body()
     body: {
       name?: string;
+      audienceId?: string;
       subject?: string;
       fromName?: string;
       fromEmail?: string;
       replyTo?: string;
       htmlBody?: string;
       templateId?: string;
+      isSequence?: boolean;
       trackOpens?: boolean;
       trackClicks?: boolean;
       status?: string;
@@ -89,15 +91,18 @@ export class CampaignsController {
 
     const updateData: any = {};
     if (body.name !== undefined) updateData.name = body.name;
+    if (body.audienceId !== undefined) updateData.audienceId = body.audienceId;
     if (body.subject !== undefined) updateData.subject = body.subject;
     if (body.fromName !== undefined) updateData.fromName = body.fromName;
     if (body.fromEmail !== undefined) updateData.fromEmail = body.fromEmail;
     if (body.replyTo !== undefined) updateData.replyTo = body.replyTo;
     if (body.htmlBody !== undefined) updateData.htmlBody = body.htmlBody;
     if (body.templateId !== undefined) updateData.templateId = body.templateId;
+    if (body.isSequence !== undefined) updateData.isSequence = body.isSequence;
     if (body.trackOpens !== undefined) updateData.trackOpens = body.trackOpens;
     if (body.trackClicks !== undefined) updateData.trackClicks = body.trackClicks;
     if (body.status !== undefined) updateData.status = body.status;
+
 
 
     if (Object.keys(updateData).length > 0) {
