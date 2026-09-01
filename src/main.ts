@@ -45,7 +45,9 @@ async function bootstrap() {
 
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const bodyParser = require('body-parser');
-    app.use(bodyParser.json({ type: ['application/json', 'text/plain'] }));
+    app.use(bodyParser.json({ limit: '50mb', type: ['application/json', 'text/plain'] }));
+    app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
+
 
     const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
     console.log(`[BOOT] Starting server on 0.0.0.0:${port}...`);
