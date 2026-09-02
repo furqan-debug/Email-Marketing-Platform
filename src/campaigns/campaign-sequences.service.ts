@@ -284,10 +284,8 @@ export class CampaignSequencesService {
 
         if (/\{\{\s*unsubscribe(?:_url)?\s*\}\}/i.test(personalHtml)) {
           personalHtml = personalHtml.replace(/\{\{\s*unsubscribe(?:_url)?\s*\}\}/gi, unsubUrl);
-        } else {
-          const unsubFooter = `\n<div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#888;">\n  <a href="${unsubUrl}" style="color:#888;text-decoration:underline;">Unsubscribe</a>\n</div>`;
-          personalHtml += unsubFooter;
         }
+
 
         try {
           await this.trackingService.saveToken(msg.id, unsubToken);
@@ -470,10 +468,8 @@ export class CampaignSequencesService {
 
           if (/\{\{\s*unsubscribe(?:_url)?\s*\}\}/i.test(personalHtml)) {
             personalHtml = personalHtml.replace(/\{\{\s*unsubscribe(?:_url)?\s*\}\}/gi, unsubUrl);
-          } else {
-            const unsubFooter = `\n<div style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;text-align:center;font-size:12px;color:#888;">\n  <a href="${unsubUrl}" style="color:#888;text-decoration:underline;">Unsubscribe</a>\n</div>`;
-            personalHtml += unsubFooter;
           }
+
 
           try {
             await this.trackingService.saveToken(msg.id, unsubToken);
