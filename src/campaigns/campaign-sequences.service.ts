@@ -732,19 +732,75 @@ export class CampaignSequencesService {
 
   // Helper for merge tags
   private renderMergeTags(templateText: string, contact: ContactEntry): string {
-    return templateText.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key: string) => {
-      const lowerKey = key.toLowerCase();
-      if (lowerKey === 'first_name' || lowerKey === 'firstname') return contact.firstName ?? '';
-      if (lowerKey === 'last_name' || lowerKey === 'lastname') return contact.lastName ?? '';
-      if (lowerKey === 'email') return contact.email;
+    return templateText.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, rawKey: string) => {
+      const lowerKey = rawKey.toLowerCase();
+      const cleanKey = lowerKey.replace(/[^a-z0-9]/g, '');
+
+      // First Name
+      if (['first_name', 'firstname', 'fname', 'first', 'first-name', 'f_name'].includes(lowerKey) || cleanKey === 'firstname' || cleanKey === 'fname') {
+        if (contact.firstName) return contact.firstName;
+      }
+
+      // Last Name
+      if (['last_name', 'lastname', 'lname', 'last', 'last-name', 'l_name'].includes(lowerKey) || cleanKey === 'lastname' || cleanKey === 'lname') {
+        if (contact.lastName) return contact.lastName;
+      }
+
+      // Email
+      if (['email', 'email_address', 'mail', 'emailaddress', 'e-mail'].includes(lowerKey) || cleanKey === 'email' || cleanKey === 'emailaddress') {
+        if (contact.email) return contact.email;
+      }
 
       if (contact.attributes && typeof contact.attributes === 'object') {
         const attrs = contact.attributes as Record<string, any>;
-        if (attrs[key] !== undefined && attrs[key] !== null) return String(attrs[key]);
-        if (attrs[lowerKey] !== undefined && attrs[lowerKey] !== null) return String(attrs[lowerKey]);
-        const noUnder = lowerKey.replace(/_/g, '');
-        const foundKey = Object.keys(attrs).find((k) => k.toLowerCase().replace(/_/g, '') === noUnder);
-        if (foundKey && attrs[foundKey] !== undefined && attrs[foundKey] !== null) return String(attrs[foundKey]);
+
+        // Direct match
+        if (attrs[rawKey] !== undefined && attrs[rawKey] !== null && String(attrs[rawKey]).trim() !== '') {
+          return String(attrs[rawKey]);
+        }
+        if (attrs[lowerKey] !== undefined && attrs[lowerKey] !== null && String(attrs[lowerKey]).trim() !== '') {
+          return String(attrs[lowerKey]);
+        }
+
+        // Job Title aliases
+        const TITLE_ALIASES = ['title', 'job_title', 'jobtitle', 'job-title', 'job', 'role', 'position', 'designation', 'occupation'];
+        if (TITLE_ALIASES.includes(lowerKey) || TITLE_ALIASES.map(a => a.replace(/[^a-z0-9]/g, '')).includes(cleanKey)) {
+          for (const alias of ['title', 'job_title', 'jobTitle', 'jobtitle', 'job-title', 'role', 'position', 'designation', 'job', 'occupation']) {
+            if (attrs[alias] !== undefined && attrs[alias] !== null && String(attrs[alias]).trim() !== '') {
+              return String(attrs[alias]);
+            }
+          }
+          const matchedTitleKey = Object.keys(attrs).find(k => {
+            const kClean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return ['title', 'jobtitle', 'job', 'role', 'position', 'designation'].includes(kClean);
+          });
+          if (matchedTitleKey && attrs[matchedTitleKey] !== undefined && attrs[matchedTitleKey] !== null) {
+            return String(attrs[matchedTitleKey]);
+          }
+        }
+
+        // Company Name aliases
+        const COMPANY_ALIASES = ['company_name', 'company', 'companyname', 'company-name', 'organization', 'org', 'business', 'business_name', 'comp_name', 'compnay', 'compny'];
+        if (COMPANY_ALIASES.includes(lowerKey) || COMPANY_ALIASES.map(a => a.replace(/[^a-z0-9]/g, '')).includes(cleanKey)) {
+          for (const alias of ['company_name', 'companyName', 'company', 'companyname', 'organization', 'org', 'business', 'business_name', 'comp_name']) {
+            if (attrs[alias] !== undefined && attrs[alias] !== null && String(attrs[alias]).trim() !== '') {
+              return String(attrs[alias]);
+            }
+          }
+          const matchedCompKey = Object.keys(attrs).find(k => {
+            const kClean = k.toLowerCase().replace(/[^a-z0-9]/g, '');
+            return ['companyname', 'company', 'organization', 'org', 'business', 'businessname'].includes(kClean);
+          });
+          if (matchedCompKey && attrs[matchedCompKey] !== undefined && attrs[matchedCompKey] !== null) {
+            return String(attrs[matchedCompKey]);
+          }
+        }
+
+        // Generic normalized match
+        const foundKey = Object.keys(attrs).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanKey);
+        if (foundKey && attrs[foundKey] !== undefined && attrs[foundKey] !== null && String(attrs[foundKey]).trim() !== '') {
+          return String(attrs[foundKey]);
+        }
       }
       return '';
     });
