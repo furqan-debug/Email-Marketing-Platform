@@ -12,6 +12,7 @@ import { AnalyticsModule } from './analytics/analytics.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { TemplatesModule } from './templates/templates.module';
+import { ImapModule } from './imap/imap.module';
 import IORedis from 'ioredis';
 
 @Module({
@@ -40,8 +41,10 @@ import IORedis from 'ioredis';
     WorkflowsModule,
     PrismaModule,
     TemplatesModule,
+    ImapModule,
   ],
   controllers: [AppController],
   providers: [AppService],
 })
 export class AppModule {}
+
