@@ -36,17 +36,31 @@ export class InboxService {
     const thread = await this.prisma.inboxThread.upsert({
       where: { campaignId_contactId: { campaignId, contactId } },
       create: { campaignId, contactId, contactEmail, contactName, subject, status: 'unread' },
-      update: { contactName: contactName ?? undefined, subject: subject ?? undefined, status: 'unread', updatedAt: new Date() },
+      update: { contactName: contactName ?? undefined, subject: subject ?? undefined, updatedAt: new Date() },
     });
 
-    const bodySnippet = body.slice(0, 100);
-    const existing = await this.prisma.inboxMessage.findFirst({
-      where: { threadId: thread.id, direction: 'inbound', body: bodySnippet },
+    const cleanNew = cleanEmailBody(body).cleanText.trim();
+
+    // Check if a message with matching body or clean body already exists in this thread
+    const existingMessages = await this.prisma.inboxMessage.findMany({
+      where: { threadId: thread.id, direction: 'inbound' },
+      select: { id: true, body: true },
     });
 
-    if (!existing) {
+    const isDuplicate = existingMessages.some((m) => {
+      if (m.body === body) return true;
+      const cleanExisting = cleanEmailBody(m.body).cleanText.trim();
+      return cleanExisting.length > 0 && cleanExisting === cleanNew;
+    });
+
+    if (!isDuplicate) {
       await this.prisma.inboxMessage.create({
         data: { threadId: thread.id, direction: 'inbound', fromEmail, toEmail, subject, body },
+      });
+      // Set status to unread only if new unique reply came in
+      await this.prisma.inboxThread.update({
+        where: { id: thread.id },
+        data: { status: 'unread', updatedAt: new Date() },
       });
       this.logger.log(`[Inbox] Stored inbound message from ${fromEmail} in thread ${thread.id}`);
     }
@@ -132,15 +146,23 @@ export class InboxService {
     });
     if (!thread) throw new NotFoundException(`Inbox thread ${id} not found`);
 
-    // Clean all messages
-    const cleanedMessages = (thread.messages || []).map((msg) => {
+    // Clean and deduplicate messages in memory
+    const seenKeys = new Set<string>();
+    const uniqueMessages: any[] = [];
+
+    for (const msg of thread.messages || []) {
       const { cleanText, quotedText } = cleanEmailBody(msg.body);
-      return {
+      const key = `${msg.direction}_${cleanText.trim()}`;
+      if (seenKeys.has(key)) {
+        continue; // Skip duplicate message
+      }
+      seenKeys.add(key);
+      uniqueMessages.push({
         ...msg,
         cleanBody: cleanText,
         quotedBody: quotedText,
-      };
-    });
+      });
+    }
 
     // Render merge tags in campaign body if contact has attributes
     let renderedCampaignHtml = thread.campaign?.htmlBody || '';
@@ -173,7 +195,7 @@ export class InboxService {
             renderedHtml: renderedCampaignHtml,
           }
         : null,
-      messages: cleanedMessages,
+      messages: uniqueMessages,
     };
   }
 

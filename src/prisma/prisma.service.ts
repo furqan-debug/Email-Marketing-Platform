@@ -136,10 +136,21 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         CREATE INDEX IF NOT EXISTS "InboxThread_status_idx" ON "InboxThread"("status");
         CREATE INDEX IF NOT EXISTS "InboxThread_updatedAt_idx" ON "InboxThread"("updatedAt");
         CREATE INDEX IF NOT EXISTS "InboxMessage_threadId_idx" ON "InboxMessage"("threadId");
+
+        -- Clean up duplicate messages
+        DELETE FROM "InboxMessage"
+        WHERE id IN (
+          SELECT id FROM (
+            SELECT id, ROW_NUMBER() OVER (PARTITION BY "threadId", "body" ORDER BY "sentAt" ASC) as rnum
+            FROM "InboxMessage"
+          ) t
+          WHERE t.rnum > 1
+        );
       `);
     } catch (inboxErr: any) {
       console.warn('Inbox table migration notice:', inboxErr?.message);
     }
+
 
     // Historical date backfill for existing campaigns
     try {
