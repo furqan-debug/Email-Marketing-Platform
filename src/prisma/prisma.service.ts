@@ -117,6 +117,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
         UPDATE "Campaign" SET "createdAt" = '2026-09-02 22:00:00' WHERE "name" = '2-Sep-SN(3)';
         UPDATE "Campaign" SET "createdAt" = '2026-09-02 20:00:00' WHERE "name" = '2-Sep-SN(2)';
         UPDATE "Campaign" SET "createdAt" = '2026-09-02 18:00:00' WHERE "name" = '2-Sep-SN';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-01 16:00:00' WHERE "name" = 'Q3 Sales Outreach';
         UPDATE "Campaign" SET "createdAt" = '2026-08-31 15:19:00' WHERE "name" = '31-Aug-SN-Test';
         UPDATE "Campaign" SET "createdAt" = '2026-08-28 16:08:00' WHERE "name" = '28-Aug-Test-2';
         UPDATE "Campaign" SET "createdAt" = '2026-08-28 15:08:00' WHERE "name" = '28-Aug-Test';
@@ -137,6 +138,7 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       console.warn('Campaign backfill notice in onModuleInit:', backfillErr?.message);
     }
   }
+
 
 
 
