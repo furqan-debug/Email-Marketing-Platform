@@ -40,7 +40,7 @@ export class ContactsController {
     return this.prisma.audience.findMany({
       where: workspaceId ? { workspaceId } : undefined,
       select: { id: true, name: true, workspaceId: true },
-      orderBy: { name: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -66,12 +66,13 @@ export class ContactsController {
       this.prisma.contact.findMany({
         where: { audienceId },
         select: { id: true, email: true, firstName: true, lastName: true, attributes: true },
-        orderBy: { email: 'asc' },
+        orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
       }),
       this.prisma.contact.count({ where: { audienceId } }),
     ]);
+
 
     return { data, total, page, limit, pages: Math.ceil(total / limit) };
   }

@@ -37,9 +37,10 @@ export class CampaignsController {
         snapshot: true,
         steps: { select: { id: true, stepOrder: true, delayHours: true } },
       },
-      orderBy: { id: 'desc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
+
 
   /**
    * GET /campaigns/:id

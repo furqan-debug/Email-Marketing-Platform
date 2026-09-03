@@ -19,6 +19,7 @@ async function run() {
         <p>We are excited to have you, {{first_name}}.</p>
       </div>
     `.trim(),
+    createdAt: new Date(),
   };
 
   // Mock contact
@@ -29,7 +30,9 @@ async function run() {
     lastName: 'Smith',
     attributes: null,
     audienceId: 'aud-789',
+    createdAt: new Date(),
   };
+
 
   console.log('--- Input Contact ---');
   console.log(`Email: ${mockContact.email}`);

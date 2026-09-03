@@ -39,6 +39,7 @@ export class AppController {
   listWorkspaces() {
     return this.prisma.workspace.findMany({
       select: { id: true, name: true },
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -62,9 +63,10 @@ export class AppController {
         workspaceId: true,
         _count: { select: { contacts: true } },
       },
-      orderBy: { name: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
+
 
   /** POST /audiences — create an audience in a workspace */
   @Post('audiences')

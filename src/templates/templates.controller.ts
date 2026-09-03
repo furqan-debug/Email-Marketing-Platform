@@ -1,4 +1,4 @@
-﻿import {
+import {
   Body,
   Controller,
   Delete,
@@ -20,9 +20,10 @@ export class TemplatesController {
   listTemplates() {
     return this.prisma.template.findMany({
       select: { id: true, name: true, subject: true },
-      orderBy: { name: 'asc' },
+      orderBy: { createdAt: 'desc' },
     });
   }
+
 
   /** POST /templates — create a new template */
   @Post()

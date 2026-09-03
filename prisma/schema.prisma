@@ -11,6 +11,7 @@ generator client {
  model Workspace {
    id           String        @id @default(uuid())
    name         String
+   createdAt    DateTime      @default(now())
    audiences    Audience[]
    suppressions Suppression[]
  }
@@ -19,6 +20,7 @@ generator client {
    id          String     @id @default(uuid())
    name        String
    workspaceId String
+   createdAt   DateTime   @default(now())
    workspace   Workspace  @relation(fields: [workspaceId], references: [id])
    contacts    Contact[]
    campaigns   Campaign[]
@@ -31,6 +33,7 @@ generator client {
   lastName           String?
   attributes         Json?               // arbitrary custom key-value attributes from CSV
   audienceId         String
+  createdAt          DateTime            @default(now())
   audience           Audience            @relation(fields: [audienceId], references: [id])
   messages           Message[]
   leads              CampaignLead[]
@@ -54,12 +57,14 @@ generator client {
   trackOpens Boolean            @default(true)
   trackClicks Boolean           @default(true)
   audienceId String
+  createdAt  DateTime           @default(now())
   audience   Audience           @relation(fields: [audienceId], references: [id])
   steps      CampaignStep[]
   leads      CampaignLead[]
   messages   Message[]
   snapshot   AnalyticsSnapshot?
 }
+
 
 
 
@@ -139,8 +144,10 @@ model CampaignLead {
    name      String
    subject   String?
    html      String
+   createdAt DateTime   @default(now())
    campaigns Campaign[]
  }
+
 
  model AnalyticsSnapshot {
   id          String   @id @default(uuid())
