@@ -68,7 +68,30 @@ export class WebhooksService {
     }
 
     const { eventType, mail } = sesMessage;
+    const notificationType = (sesMessage as any).notificationType;
     const sesMessageId = mail?.messageId;
+
+    // 1. Check if this is an Inbound Email received via SES Receipt Rule
+    const isReceived = notificationType === 'Received' || eventType === 'Received' || (sesMessage as any).receipt !== undefined;
+    if (isReceived) {
+      const headers = mail?.headers || [];
+      const inReplyToHeader = headers.find((h: any) => h.name?.toLowerCase() === 'in-reply-to')?.value;
+      const referencesHeader = headers.find((h: any) => h.name?.toLowerCase() === 'references')?.value;
+      const fromEmail = mail?.source || mail?.commonHeaders?.from?.[0] || (headers.find((h: any) => h.name?.toLowerCase() === 'from')?.value) || '';
+      const subject = mail?.commonHeaders?.subject || '';
+      const content = (sesMessage as any).content || '';
+
+      this.logger.log(`SES Inbound Email received from: ${fromEmail} (Subject: "${subject}")`);
+
+      return this.handleInboundReply({
+        from: fromEmail,
+        to: mail?.destination?.[0],
+        subject,
+        inReplyTo: inReplyToHeader,
+        references: referencesHeader,
+        body: content,
+      });
+    }
 
     if (!sesMessageId) {
       this.logger.warn('SES notification missing mail.messageId — skipping');
@@ -76,13 +99,14 @@ export class WebhooksService {
     }
 
     const HANDLED: SesEventType[] = ['Send', 'Delivery', 'Bounce', 'Complaint', 'Open', 'Click', 'Reply', 'Received'];
-    if (!HANDLED.includes(eventType)) {
+    if (eventType && !HANDLED.includes(eventType)) {
       this.logger.warn(`Unhandled SES eventType: ${eventType}`);
       return { status: 'unhandled_event_type' };
     }
 
     // Normalize event type
     const normalizedType = eventType === 'Received' ? 'Reply' : eventType;
+
 
     // Look up the Message row by its SES MessageId (stored as Message.id).
     const message = await this.prisma.message.findUnique({
