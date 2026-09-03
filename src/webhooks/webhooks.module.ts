@@ -13,6 +13,8 @@ import { AnalyticsModule } from '../analytics/analytics.module';
   ],
   controllers: [WebhooksController],
   providers: [WebhooksService],
+  exports: [WebhooksService],
 })
 export class WebhooksModule {}
+
 
