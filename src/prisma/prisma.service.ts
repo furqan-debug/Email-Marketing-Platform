@@ -106,6 +106,41 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       console.warn('Auto-migration notice in onModuleInit:', err?.message);
     }
 
+    // Inbox tables
+    try {
+      await this.pool.query(`
+        CREATE TABLE IF NOT EXISTS "InboxThread" (
+          "id"           TEXT NOT NULL PRIMARY KEY,
+          "campaignId"   TEXT NOT NULL REFERENCES "Campaign"("id") ON DELETE CASCADE,
+          "contactId"    TEXT NOT NULL REFERENCES "Contact"("id") ON DELETE CASCADE,
+          "contactEmail" TEXT NOT NULL,
+          "contactName"  TEXT,
+          "subject"      TEXT,
+          "status"       TEXT NOT NULL DEFAULT 'unread',
+          "createdAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          CONSTRAINT "InboxThread_campaignId_contactId_key" UNIQUE ("campaignId", "contactId")
+        );
+
+        CREATE TABLE IF NOT EXISTS "InboxMessage" (
+          "id"        TEXT NOT NULL PRIMARY KEY,
+          "threadId"  TEXT NOT NULL REFERENCES "InboxThread"("id") ON DELETE CASCADE,
+          "direction" TEXT NOT NULL,
+          "fromEmail" TEXT NOT NULL,
+          "toEmail"   TEXT NOT NULL,
+          "subject"   TEXT,
+          "body"      TEXT NOT NULL,
+          "sentAt"    TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS "InboxThread_status_idx" ON "InboxThread"("status");
+        CREATE INDEX IF NOT EXISTS "InboxThread_updatedAt_idx" ON "InboxThread"("updatedAt");
+        CREATE INDEX IF NOT EXISTS "InboxMessage_threadId_idx" ON "InboxMessage"("threadId");
+      `);
+    } catch (inboxErr: any) {
+      console.warn('Inbox table migration notice:', inboxErr?.message);
+    }
+
     // Historical date backfill for existing campaigns
     try {
       await this.pool.query(`
@@ -160,8 +195,10 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
   get campaignStep()      { return (this.client as any).campaignStep; }
   get campaignLead()      { return (this.client as any).campaignLead; }
   get workflowExecution() { return (this.client as any).workflowExecution; }
-
+  get inboxThread()       { return (this.client as any).inboxThread; }
+  get inboxMessage()      { return (this.client as any).inboxMessage; }
 
   // Transaction helper
   get $transaction()      { return this.client.$transaction.bind(this.client); }
 }
+

@@ -38,9 +38,11 @@ generator client {
   messages           Message[]
   leads              CampaignLead[]
   workflowExecutions WorkflowExecution[]
+  inboxThreads       InboxThread[]
 
   @@unique([audienceId, email])
 }
+
 
  model Campaign {
   id         String             @id @default(uuid())
@@ -63,7 +65,9 @@ generator client {
   leads      CampaignLead[]
   messages   Message[]
   snapshot   AnalyticsSnapshot?
+  inboxThreads InboxThread[]
 }
+
 
 
 
@@ -177,4 +181,34 @@ model CampaignLead {
    createdAt    DateTime @default(now())
    updatedAt    DateTime @updatedAt
  }
+
+model InboxThread {
+  id           String         @id @default(uuid())
+  campaignId   String
+  contactId    String
+  contactEmail String
+  contactName  String?
+  subject      String?
+  status       String         @default("unread") // unread, read, replied, archived
+  campaign     Campaign       @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  contact      Contact        @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  messages     InboxMessage[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@unique([campaignId, contactId])
+}
+
+model InboxMessage {
+  id        String      @id @default(uuid())
+  threadId  String
+  thread    InboxThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  direction String      // "inbound" | "outbound"
+  fromEmail String
+  toEmail   String
+  subject   String?
+  body      String
+  sentAt    DateTime    @default(now())
+}
+
 

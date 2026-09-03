@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ImapFlow } from 'imapflow';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { InboxService } from '../inbox/inbox.service';
 
 export interface ImapAccountConfig {
   host?: string;
@@ -21,7 +22,9 @@ export class ImapService {
   constructor(
     private readonly webhooksService: WebhooksService,
     private readonly prisma: PrismaService,
+    private readonly inboxService: InboxService,
   ) {}
+
 
   /**
    * Get all configured IMAP accounts from environment variables
@@ -172,14 +175,16 @@ export class ImapService {
     try {
       const lock = await client.getMailboxLock('INBOX');
       try {
-        // Query recent emails from the past 7 days
-        const sinceDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+        // Query recent emails from the past 30 days (extended for Inbox history)
+        const sinceDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
         const searchRange = { since: sinceDate };
 
         const messages = client.fetch(searchRange, {
           envelope: true,
           flags: true,
           internalDate: true,
+          bodyStructure: true,
+          source: true,
         });
 
         for await (const message of messages) {
@@ -188,6 +193,7 @@ export class ImapService {
           if (!env) continue;
 
           const fromEmail = env.from?.[0]?.address?.toLowerCase()?.trim() || '';
+          const fromName = env.from?.[0]?.name || '';
           const toEmail = env.to?.[0]?.address?.toLowerCase()?.trim() || account.user;
           const subject = env.subject || '';
           const inReplyTo = env.inReplyTo || '';
@@ -197,6 +203,30 @@ export class ImapService {
             continue; // Skip outgoing or self-sent emails
           }
 
+          // Extract body text from source buffer
+          let bodyText = '';
+          try {
+            if (message.source) {
+              const raw = message.source.toString('utf8');
+              // Extract text/plain or text/html body from raw email
+              const plainMatch = raw.match(/Content-Type: text\/plain[^\n]*\n(?:.*\n)*?\n([\s\S]*?)(?:\n--|\n\n--|\z)/i);
+              const htmlMatch = raw.match(/Content-Type: text\/html[^\n]*\n(?:.*\n)*?\n([\s\S]*?)(?:\n--|\n\n--|\z)/i);
+              if (plainMatch?.[1]) {
+                bodyText = plainMatch[1].trim();
+              } else if (htmlMatch?.[1]) {
+                bodyText = htmlMatch[1].trim();
+              } else {
+                // Fallback: use portion after blank line separator
+                const parts = raw.split(/\r?\n\r?\n/);
+                bodyText = parts.slice(1).join('\n\n').trim().slice(0, 5000);
+              }
+            }
+          } catch (bodyErr: any) {
+            bodyText = `[Email received — body could not be parsed]`;
+          }
+
+          if (!bodyText) bodyText = `[Reply from ${fromEmail}: ${subject}]`;
+
           // Process inbound email through our universal reply processor
           try {
             const result = await this.webhooksService.handleInboundReply({
@@ -205,12 +235,47 @@ export class ImapService {
               subject,
               inReplyTo,
               references: messageId,
-              body: '[IMAP Inbound Sync] ' + subject,
+              body: bodyText,
             });
 
             if (result.status === 'ok' && result.matchedCount > 0) {
               matched += result.matchedCount;
               this.logger.log('[IMAP Sync] Logged reply from ' + fromEmail + ' (Subject: "' + subject + '")');
+
+              // Find the contact and campaign to build an inbox thread
+              try {
+                const contacts = await this.prisma.contact.findMany({
+                  where: { email: { equals: fromEmail, mode: 'insensitive' } },
+                  select: { id: true, firstName: true, lastName: true },
+                });
+
+                if (contacts.length > 0) {
+                  const contact = contacts[0];
+                  const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || fromName || undefined;
+
+                  // Find recent messages for this contact to get campaignId
+                  const recentMsg = await this.prisma.message.findFirst({
+                    where: { contactId: contact.id },
+                    orderBy: { enqueuedAt: 'desc' },
+                    select: { campaignId: true },
+                  });
+
+                  if (recentMsg) {
+                    await this.inboxService.createOrUpdateThread({
+                      campaignId: recentMsg.campaignId,
+                      contactId: contact.id,
+                      contactEmail: fromEmail,
+                      contactName,
+                      subject,
+                      body: bodyText,
+                      fromEmail,
+                      toEmail,
+                    });
+                  }
+                }
+              } catch (inboxErr: any) {
+                this.logger.warn('[IMAP Sync] Failed to create inbox thread: ' + inboxErr?.message);
+              }
             }
           } catch (replyErr: any) {
             this.logger.warn('[IMAP Sync] Error processing reply from ' + fromEmail + ': ' + replyErr?.message);
@@ -239,3 +304,4 @@ export class ImapService {
     };
   }
 }
+
