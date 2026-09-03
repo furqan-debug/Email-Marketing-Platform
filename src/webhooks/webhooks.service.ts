@@ -212,50 +212,51 @@ export class WebhooksService {
 
     const contactIds = contacts.map(c => c.id);
 
-    // Find active campaign leads for these contacts
-    const leadsWhere: any = {
+    // 1. Find recent sent messages for this contact (matches single broadcasts AND sequence steps)
+    const messagesWhere: any = {
       contactId: { in: contactIds },
+      enqueuedAt: { not: null },
     };
     if (payload.campaignId) {
-      leadsWhere.campaignId = payload.campaignId;
+      messagesWhere.campaignId = payload.campaignId;
     }
 
-    const matchedLeads = await this.prisma.campaignLead.findMany({
-      where: leadsWhere,
-      select: { id: true, campaignId: true, contactId: true, status: true },
+    const recentMessages = await this.prisma.message.findMany({
+      where: messagesWhere,
+      orderBy: { enqueuedAt: 'desc' },
+      take: 10,
     });
 
-    if (matchedLeads.length === 0) {
-      this.logger.log(`No active campaign leads found for contact ${senderEmail}`);
-      return { status: 'no_leads_found', matchedCount: 0, contactEmail: senderEmail };
+    if (recentMessages.length === 0) {
+      this.logger.log(`No sent messages found for contact ${senderEmail}`);
+      return { status: 'no_messages_found', matchedCount: 0, contactEmail: senderEmail };
     }
 
-    // Mark leads as REPLIED and halt next send
-    await this.prisma.campaignLead.updateMany({
-      where: {
-        id: { in: matchedLeads.map(l => l.id) },
-      },
-      data: {
-        status: 'REPLIED',
-        nextSendAt: null,
-      },
-    });
+    // Identify target campaigns
+    const campaignIds = Array.from(new Set(recentMessages.map(m => m.campaignId)));
 
-    // Create Event(type: 'Reply') for each matched lead's latest message
-    for (const lead of matchedLeads) {
-      const latestMsg = await this.prisma.message.findFirst({
+    // Create Event(type: 'Reply') for the most recent message per campaign
+    const seenCampaigns = new Set<string>();
+    let createdEvents = 0;
+
+    for (const msg of recentMessages) {
+      if (seenCampaigns.has(msg.campaignId)) continue;
+      seenCampaigns.add(msg.campaignId);
+
+      // Check if a Reply event was already recorded for this message in last 60 seconds
+      const existingReply = await this.prisma.event.findFirst({
         where: {
-          campaignId: lead.campaignId,
-          contactId: lead.contactId,
+          messageId: msg.id,
+          type: 'Reply',
+          occurredAt: { gte: new Date(Date.now() - 60000) },
         },
-        orderBy: { enqueuedAt: 'desc' },
       });
 
-      if (latestMsg) {
+      if (!existingReply) {
         await this.prisma.event.create({
           data: {
             type: 'Reply',
-            messageId: latestMsg.id,
+            messageId: msg.id,
             rawPayload: {
               from: senderEmail,
               to: payload.to,
@@ -268,16 +269,30 @@ export class WebhooksService {
             occurredAt: new Date(),
           },
         });
+        createdEvents++;
       }
     }
 
-    this.logger.log(`Successfully marked ${matchedLeads.length} lead(s) as REPLIED for ${senderEmail}`);
+    // 2. Halt any multi-step follow-up sequences for this contact
+    await this.prisma.campaignLead.updateMany({
+      where: {
+        contactId: { in: contactIds },
+        campaignId: { in: campaignIds },
+      },
+      data: {
+        status: 'REPLIED',
+        nextSendAt: null,
+      },
+    });
+
+    this.logger.log(`Successfully logged Reply for ${senderEmail} across ${seenCampaigns.size} campaign(s)`);
     return {
       status: 'ok',
-      matchedCount: matchedLeads.length,
+      matchedCount: createdEvents,
       contactEmail: senderEmail,
     };
   }
 }
+
 
 
