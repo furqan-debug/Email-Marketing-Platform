@@ -1,4 +1,4 @@
-﻿import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Param, Post, Query } from '@nestjs/common';
 import { InboxService } from './inbox.service';
 
 @Controller('inbox')
@@ -51,6 +51,14 @@ export class InboxController {
   archive(@Param('id') id: string) {
     return this.inboxService.archiveThread(id);
   }
+
+  /** POST /inbox/:id/unarchive — unarchive thread back to active inbox */
+  @Post(':id/unarchive')
+  @HttpCode(200)
+  unarchive(@Param('id') id: string) {
+    return this.inboxService.unarchiveThread(id);
+  }
+
 
   /** POST /inbox/:id/reply — send reply { body: string } */
   @Post(':id/reply')

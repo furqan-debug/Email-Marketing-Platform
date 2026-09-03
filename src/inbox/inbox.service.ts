@@ -1,4 +1,4 @@
-﻿import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { cleanEmailBody } from './email-cleaner';
@@ -210,6 +210,11 @@ export class InboxService {
   async archiveThread(id: string) {
     return this.prisma.inboxThread.update({ where: { id }, data: { status: 'archived' }, select: { id: true, status: true } });
   }
+
+  async unarchiveThread(id: string) {
+    return this.prisma.inboxThread.update({ where: { id }, data: { status: 'read' }, select: { id: true, status: true } });
+  }
+
 
   async sendReply(id: string, body: string) {
     const thread = await this.prisma.inboxThread.findUnique({
