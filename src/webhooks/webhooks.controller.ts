@@ -40,4 +40,33 @@ export class WebhooksController {
 
     return this.webhooksService.handleSnsEnvelope(envelope);
   }
+
+  /**
+   * POST /webhooks/inbound-reply
+   *
+   * Receives parsed inbound email payloads from email routing services,
+   * SES Inbound S3/SNS, Cloudflare Email Routing, Postmark, SendGrid, or Zapier.
+   */
+  @Post('inbound-reply')
+  @HttpCode(200)
+  async handleInboundReply(
+    @Body()
+    body: {
+      from: string;
+      to?: string;
+      subject?: string;
+      inReplyTo?: string;
+      references?: string;
+      campaignId?: string;
+      body?: string;
+      text?: string;
+      html?: string;
+    },
+  ) {
+    if (!body || !body.from) {
+      throw new BadRequestException('Field "from" is required');
+    }
+    return this.webhooksService.handleInboundReply(body);
+  }
 }
+

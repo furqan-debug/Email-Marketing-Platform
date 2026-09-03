@@ -147,5 +147,112 @@ export class WebhooksService {
     this.logger.log(`Created Event(type=${normalizedType}) for messageId=${message.id}`);
     return { status: 'ok' };
   }
+
+  /**
+   * Universal Inbound Reply Webhook
+   * Accepts inbound email webhooks (from Cloudflare Email Routing, Postmark, SendGrid Inbound, SES Inbound S3/SNS, Zapier, etc.)
+   * Automatically marks the sender as REPLIED and halts follow-up sequences.
+   */
+  async handleInboundReply(payload: {
+    from: string;
+    to?: string;
+    subject?: string;
+    inReplyTo?: string;
+    references?: string;
+    campaignId?: string;
+    body?: string;
+    text?: string;
+    html?: string;
+  }): Promise<{ status: string; matchedCount: number; contactEmail: string }> {
+    const rawFrom = payload.from || '';
+    const emailMatch = rawFrom.match(/<([^>]+)>/) || [null, rawFrom];
+    const senderEmail = (emailMatch[1] || rawFrom).trim().toLowerCase();
+
+    if (!senderEmail || !senderEmail.includes('@')) {
+      throw new Error(`Invalid sender email address: "${rawFrom}"`);
+    }
+
+    this.logger.log(`Processing inbound reply from: ${senderEmail} (Subject: "${payload.subject || ''}")`);
+
+    // Find contact by email across all audiences
+    const contacts = await this.prisma.contact.findMany({
+      where: { email: { equals: senderEmail, mode: 'insensitive' } },
+      select: { id: true, audienceId: true },
+    });
+
+    if (contacts.length === 0) {
+      this.logger.warn(`Inbound reply received from unknown contact: ${senderEmail}`);
+      return { status: 'unmatched_contact', matchedCount: 0, contactEmail: senderEmail };
+    }
+
+    const contactIds = contacts.map(c => c.id);
+
+    // Find active campaign leads for these contacts
+    const leadsWhere: any = {
+      contactId: { in: contactIds },
+    };
+    if (payload.campaignId) {
+      leadsWhere.campaignId = payload.campaignId;
+    }
+
+    const matchedLeads = await this.prisma.campaignLead.findMany({
+      where: leadsWhere,
+      select: { id: true, campaignId: true, contactId: true, status: true },
+    });
+
+    if (matchedLeads.length === 0) {
+      this.logger.log(`No active campaign leads found for contact ${senderEmail}`);
+      return { status: 'no_leads_found', matchedCount: 0, contactEmail: senderEmail };
+    }
+
+    // Mark leads as REPLIED and halt next send
+    await this.prisma.campaignLead.updateMany({
+      where: {
+        id: { in: matchedLeads.map(l => l.id) },
+      },
+      data: {
+        status: 'REPLIED',
+        nextSendAt: null,
+      },
+    });
+
+    // Create Event(type: 'Reply') for each matched lead's latest message
+    for (const lead of matchedLeads) {
+      const latestMsg = await this.prisma.message.findFirst({
+        where: {
+          campaignId: lead.campaignId,
+          contactId: lead.contactId,
+        },
+        orderBy: { enqueuedAt: 'desc' },
+      });
+
+      if (latestMsg) {
+        await this.prisma.event.create({
+          data: {
+            type: 'Reply',
+            messageId: latestMsg.id,
+            rawPayload: {
+              from: senderEmail,
+              to: payload.to,
+              subject: payload.subject,
+              inReplyTo: payload.inReplyTo,
+              references: payload.references,
+              snippet: (payload.body || payload.text || '').slice(0, 500),
+              receivedAt: new Date().toISOString(),
+            },
+            occurredAt: new Date(),
+          },
+        });
+      }
+    }
+
+    this.logger.log(`Successfully marked ${matchedLeads.length} lead(s) as REPLIED for ${senderEmail}`);
+    return {
+      status: 'ok',
+      matchedCount: matchedLeads.length,
+      contactEmail: senderEmail,
+    };
+  }
 }
+
 
