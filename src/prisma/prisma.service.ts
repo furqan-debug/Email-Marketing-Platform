@@ -106,7 +106,38 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
       console.warn('Auto-migration notice in onModuleInit:', err?.message);
     }
 
+    // Historical date backfill for existing campaigns
+    try {
+      await this.pool.query(`
+        UPDATE "Campaign" SET "createdAt" = '2026-09-04 01:11:00' WHERE "name" = 'Q3 Sales Outreach Y';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-04 00:52:00' WHERE "name" = 'Q3 Sales Outreach x';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-03 22:30:00' WHERE "name" = '3-Sep-Check(3)';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-03 15:30:00' WHERE "name" = '3-Sep-Check(2)';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-03 15:13:00' WHERE "name" = '3-Sep-Check';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-02 22:00:00' WHERE "name" = '2-Sep-SN(3)';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-02 20:00:00' WHERE "name" = '2-Sep-SN(2)';
+        UPDATE "Campaign" SET "createdAt" = '2026-09-02 18:00:00' WHERE "name" = '2-Sep-SN';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-31 15:19:00' WHERE "name" = '31-Aug-SN-Test';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-28 16:08:00' WHERE "name" = '28-Aug-Test-2';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-28 15:08:00' WHERE "name" = '28-Aug-Test';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-26 20:09:00' WHERE "name" = '26-Aug-SN';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-26 20:07:00' WHERE "name" = '26-Open Rate Again Test';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-26 20:05:00' WHERE "name" = '26-Open Rate-Checking';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-25 18:00:00' WHERE "name" = '25-Aug-SN-Daniel';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-25 16:00:00' WHERE "name" = '25-Aug Testing 2';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-25 15:00:00' WHERE "name" = '25-Aug-Test 1st Campaign';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 18:00:00' WHERE "name" = 'Test Campaign 4.7';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 17:00:00' WHERE "name" = 'Test Campaign 4.6';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 16:00:00' WHERE "name" = 'Test Campaign 4.5';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 15:00:00' WHERE "name" = 'DigiReps Beta Testing';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 14:00:00' WHERE "name" = 'Summer Product Update';
+        UPDATE "Campaign" SET "createdAt" = '2026-08-24 13:00:00' WHERE "name" = 'test campaign (let''s) issue';
+      `);
+    } catch (backfillErr: any) {
+      console.warn('Campaign backfill notice in onModuleInit:', backfillErr?.message);
+    }
   }
+
 
 
   async onModuleDestroy() {
