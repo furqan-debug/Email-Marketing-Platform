@@ -3,6 +3,8 @@ import { ImapFlow } from 'imapflow';
 import { WebhooksService } from '../webhooks/webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InboxService } from '../inbox/inbox.service';
+import { cleanEmailBody } from '../inbox/email-cleaner';
+
 
 export interface ImapAccountConfig {
   host?: string;
@@ -208,24 +210,15 @@ export class ImapService {
           try {
             if (message.source) {
               const raw = message.source.toString('utf8');
-              // Extract text/plain or text/html body from raw email
-              const plainMatch = raw.match(/Content-Type: text\/plain[^\n]*\n(?:.*\n)*?\n([\s\S]*?)(?:\n--|\n\n--|\z)/i);
-              const htmlMatch = raw.match(/Content-Type: text\/html[^\n]*\n(?:.*\n)*?\n([\s\S]*?)(?:\n--|\n\n--|\z)/i);
-              if (plainMatch?.[1]) {
-                bodyText = plainMatch[1].trim();
-              } else if (htmlMatch?.[1]) {
-                bodyText = htmlMatch[1].trim();
-              } else {
-                // Fallback: use portion after blank line separator
-                const parts = raw.split(/\r?\n\r?\n/);
-                bodyText = parts.slice(1).join('\n\n').trim().slice(0, 5000);
-              }
+              const { cleanText } = cleanEmailBody(raw);
+              bodyText = cleanText || `[Reply from ${fromEmail}: ${subject}]`;
             }
           } catch (bodyErr: any) {
-            bodyText = `[Email received — body could not be parsed]`;
+            bodyText = `[Reply from ${fromEmail}: ${subject}]`;
           }
 
           if (!bodyText) bodyText = `[Reply from ${fromEmail}: ${subject}]`;
+
 
           // Process inbound email through our universal reply processor
           try {

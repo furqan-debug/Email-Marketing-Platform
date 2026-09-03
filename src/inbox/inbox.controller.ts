@@ -11,7 +11,7 @@ export class InboxController {
     return this.inboxService.getStats();
   }
 
-  /** GET /inbox?page=1&limit=30&status=unread */
+  /** GET /inbox?page=1&limit=50&status=unread */
   @Get()
   getThreads(
     @Query('page') page?: string,
@@ -20,7 +20,7 @@ export class InboxController {
   ) {
     return this.inboxService.getThreads(
       parseInt(page || '1', 10),
-      parseInt(limit || '30', 10),
+      parseInt(limit || '50', 10),
       status,
     );
   }
@@ -36,6 +36,13 @@ export class InboxController {
   @HttpCode(200)
   markRead(@Param('id') id: string) {
     return this.inboxService.markRead(id);
+  }
+
+  /** POST /inbox/:id/unread — mark thread as unread */
+  @Post(':id/unread')
+  @HttpCode(200)
+  markUnread(@Param('id') id: string) {
+    return this.inboxService.markUnread(id);
   }
 
   /** POST /inbox/:id/archive — archive thread */
