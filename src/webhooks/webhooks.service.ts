@@ -2,6 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
+
 import type {
   SnsEnvelope,
   SesNotificationMessage,
@@ -15,7 +17,9 @@ export class WebhooksService {
   constructor(
     private readonly http: HttpService,
     private readonly prisma: PrismaService,
+    private readonly analyticsService: AnalyticsService,
   ) {}
+
 
   /**
    * Main entry point. Returns a plain object that the controller serialises to JSON.
@@ -215,7 +219,6 @@ export class WebhooksService {
     // 1. Find recent sent messages for this contact (matches single broadcasts AND sequence steps)
     const messagesWhere: any = {
       contactId: { in: contactIds },
-      enqueuedAt: { not: null },
     };
     if (payload.campaignId) {
       messagesWhere.campaignId = payload.campaignId;
@@ -223,8 +226,7 @@ export class WebhooksService {
 
     const recentMessages = await this.prisma.message.findMany({
       where: messagesWhere,
-      orderBy: { enqueuedAt: 'desc' },
-      take: 10,
+      take: 20,
     });
 
     if (recentMessages.length === 0) {
@@ -285,6 +287,16 @@ export class WebhooksService {
       },
     });
 
+    // 3. Immediately recompute analytics for all affected campaigns
+    for (const cId of campaignIds) {
+      try {
+        await this.analyticsService.computeForCampaign(cId as string);
+      } catch (aErr: any) {
+        this.logger.warn(`Failed to auto-recompute analytics for ${cId}: ${aErr?.message}`);
+      }
+    }
+
+
     this.logger.log(`Successfully logged Reply for ${senderEmail} across ${seenCampaigns.size} campaign(s)`);
     return {
       status: 'ok',
@@ -293,6 +305,7 @@ export class WebhooksService {
     };
   }
 }
+
 
 
 
