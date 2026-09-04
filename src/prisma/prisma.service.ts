@@ -146,10 +146,29 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
           ) t
           WHERE t.rnum > 1
         );
+
+        -- Synchronize true historical timestamps for inbound messages & threads
+        UPDATE "InboxMessage" m
+        SET "sentAt" = COALESCE(e."occurredAt", c."createdAt", m."sentAt")
+        FROM "InboxThread" t
+        JOIN "Campaign" c ON c.id = t."campaignId"
+        LEFT JOIN "Message" msg ON msg."campaignId" = t."campaignId" AND msg."contactId" = t."contactId"
+        LEFT JOIN "Event" e ON e."messageId" = msg.id AND e."type" = 'Reply'
+        WHERE m."threadId" = t.id AND m."direction" = 'inbound';
+
+        UPDATE "InboxThread" t
+        SET "updatedAt" = sub.max_sent, "createdAt" = sub.min_sent
+        FROM (
+          SELECT "threadId", MAX("sentAt") as max_sent, MIN("sentAt") as min_sent
+          FROM "InboxMessage"
+          GROUP BY "threadId"
+        ) sub
+        WHERE t.id = sub."threadId";
       `);
     } catch (inboxErr: any) {
       console.warn('Inbox table migration notice:', inboxErr?.message);
     }
+
 
 
     // Historical date backfill for existing campaigns

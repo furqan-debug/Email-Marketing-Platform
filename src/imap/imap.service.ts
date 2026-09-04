@@ -254,7 +254,10 @@ export class ImapService {
                   });
 
                   if (recentMsg) {
+                    const emailDate = message.internalDate ? new Date(message.internalDate) : (env.date ? new Date(env.date) : new Date());
+
                     await this.inboxService.createOrUpdateThread({
+
                       campaignId: recentMsg.campaignId,
                       contactId: contact.id,
                       contactEmail: fromEmail,
@@ -263,8 +266,10 @@ export class ImapService {
                       body: bodyText,
                       fromEmail,
                       toEmail,
+                      sentAt: emailDate,
                     });
                   }
+
                 }
               } catch (inboxErr: any) {
                 this.logger.warn('[IMAP Sync] Failed to create inbox thread: ' + inboxErr?.message);

@@ -30,13 +30,28 @@ export class InboxService {
     body: string;
     fromEmail: string;
     toEmail: string;
+    sentAt?: Date;
   }): Promise<void> {
-    const { campaignId, contactId, contactEmail, contactName, subject, body, fromEmail, toEmail } = params;
+    const { campaignId, contactId, contactEmail, contactName, subject, body, fromEmail, toEmail, sentAt } = params;
+    const msgDate = sentAt ? new Date(sentAt) : new Date();
 
     const thread = await this.prisma.inboxThread.upsert({
       where: { campaignId_contactId: { campaignId, contactId } },
-      create: { campaignId, contactId, contactEmail, contactName, subject, status: 'unread' },
-      update: { contactName: contactName ?? undefined, subject: subject ?? undefined, updatedAt: new Date() },
+      create: { 
+        campaignId, 
+        contactId, 
+        contactEmail, 
+        contactName, 
+        subject, 
+        status: 'unread',
+        createdAt: msgDate,
+        updatedAt: msgDate,
+      },
+      update: { 
+        contactName: contactName ?? undefined, 
+        subject: subject ?? undefined, 
+        updatedAt: msgDate,
+      },
     });
 
     const cleanNew = cleanEmailBody(body).cleanText.trim();
@@ -44,7 +59,7 @@ export class InboxService {
     // Check if a message with matching body or clean body already exists in this thread
     const existingMessages = await this.prisma.inboxMessage.findMany({
       where: { threadId: thread.id, direction: 'inbound' },
-      select: { id: true, body: true },
+      select: { id: true, body: true, sentAt: true },
     });
 
     const isDuplicate = existingMessages.some((m) => {
@@ -55,14 +70,22 @@ export class InboxService {
 
     if (!isDuplicate) {
       await this.prisma.inboxMessage.create({
-        data: { threadId: thread.id, direction: 'inbound', fromEmail, toEmail, subject, body },
+        data: { 
+          threadId: thread.id, 
+          direction: 'inbound', 
+          fromEmail, 
+          toEmail, 
+          subject, 
+          body,
+          sentAt: msgDate,
+        },
       });
-      // Set status to unread only if new unique reply came in
+      // Update thread updatedAt to the latest message sentAt
       await this.prisma.inboxThread.update({
         where: { id: thread.id },
-        data: { status: 'unread', updatedAt: new Date() },
+        data: { status: 'unread', updatedAt: msgDate },
       });
-      this.logger.log(`[Inbox] Stored inbound message from ${fromEmail} in thread ${thread.id}`);
+      this.logger.log(`[Inbox] Stored inbound message from ${fromEmail} (sent: ${msgDate.toISOString()}) in thread ${thread.id}`);
     }
   }
 
@@ -88,7 +111,7 @@ export class InboxService {
       this.prisma.inboxThread.count({ where: { status: 'archived' } }),
     ]);
 
-    // Format threads with cleaned snippet
+    // Format threads with cleaned snippet and true lastActivityAt
     const formattedThreads = threads.map((t) => {
       const lastMsg = t.messages?.[0];
       let preview = '';
@@ -96,11 +119,16 @@ export class InboxService {
         const cleaned = cleanEmailBody(lastMsg.body);
         preview = cleaned.cleanText.slice(0, 150);
       }
+      const lastActivityAt = lastMsg?.sentAt ? new Date(lastMsg.sentAt) : new Date(t.updatedAt);
       return {
         ...t,
         preview,
+        lastActivityAt: lastActivityAt.toISOString(),
       };
     });
+
+    // Ensure strictly sorted by lastActivityAt DESC
+    formattedThreads.sort((a, b) => new Date(b.lastActivityAt).getTime() - new Date(a.lastActivityAt).getTime());
 
     return {
       data: formattedThreads,
@@ -117,6 +145,7 @@ export class InboxService {
       },
     };
   }
+
 
   async getThread(id: string) {
     const thread = await this.prisma.inboxThread.findUnique({
