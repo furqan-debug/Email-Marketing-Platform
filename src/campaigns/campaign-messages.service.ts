@@ -368,13 +368,18 @@ export class CampaignMessagesService {
         ? [(campaign as any).replyTo.trim()]
         : [senderEmail];
 
+      // Only include List-Unsubscribe header if the template explicitly has an
+      // {{unsubscribe}} placeholder. Sending this header on cold outreach emails
+      // is the #1 reason Gmail routes them to Promotions instead of Primary.
+      const hasUnsubTag = /\{\{\s*unsubscribe(?:_url)?\s*\}\}/i.test(baseHtml);
+
       const result = await this.emailProvider.send({
         to: contact.email as string,
         subject: personalSubject,
         html,
         from: senderFrom,
         replyTo,
-        listUnsubscribeUrl: unsubUrl,
+        ...(hasUnsubTag ? { listUnsubscribeUrl: unsubUrl } : {}),
       });
       this.logger.log(`Sent message ${msgId} to ${contact.email} from ${senderFrom} — providerId: ${result.providerId}`);
 
