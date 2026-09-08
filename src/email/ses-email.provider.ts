@@ -74,14 +74,19 @@ export class SesEmailProvider implements EmailProvider {
       headers.push(`X-SES-CONFIGURATION-SET: ${configurationSet}`);
     }
 
+    // Strip browser-specific junk CSS that gets pasted from rich editors.
+    // These properties (-webkit-tap-highlight-color, box-sizing, overscroll-behavior, etc.)
+    // are meaningless in email clients and are a strong Promotions/spam signal to Gmail.
+    const cleanHtml = this.sanitizeHtml(message.html);
+
     // Generate clean plain text counterpart for spam filter compliance
-    const plainTextBody = this.htmlToPlainText(message.html);
+    const plainTextBody = this.htmlToPlainText(cleanHtml);
     const base64PlainText = Buffer.from(plainTextBody, 'utf-8')
       .toString('base64')
       .match(/.{1,76}/g)
       ?.join('\r\n') || '';
 
-    const base64HtmlBody = Buffer.from(message.html, 'utf-8')
+    const base64HtmlBody = Buffer.from(cleanHtml, 'utf-8')
       .toString('base64')
       .match(/.{1,76}/g)
       ?.join('\r\n') || '';
@@ -150,6 +155,51 @@ export class SesEmailProvider implements EmailProvider {
       return `=?UTF-8?B?${Buffer.from(value, 'utf-8').toString('base64')}?=`;
     }
     return value;
+  }
+
+  /**
+   * Strip browser-specific CSS properties that have no meaning in email clients
+   * and that Gmail's classifier treats as bulk/promotional signals.
+   * Also collapses redundant nested <span> tags that rich editors produce.
+   */
+  private sanitizeHtml(html: string): string {
+    // CSS properties to strip from every inline style attribute
+    const JUNK_CSS_PROPS = [
+      '-webkit-tap-highlight-color',
+      '-webkit-text-size-adjust',
+      'box-sizing',
+      'overscroll-behavior',
+      'font-family:\\s*unset',
+      'font-weight:\\s*unset',
+      'font-size:\\s*unset',
+    ];
+
+    // Build one regex that matches any of these property declarations (with value)
+    const junkPropPattern = new RegExp(
+      `(?:${JUNK_CSS_PROPS.join('|')})\\s*:[^;"]*(;|(?="))`,
+      'gi',
+    );
+
+    let cleaned = html
+      // 1. Remove junk CSS properties from style attributes
+      .replace(/style="([^"]*)"/gi, (_match, styleValue: string) => {
+        const stripped = styleValue
+          .replace(junkPropPattern, '')
+          // Clean up leftover semicolons / whitespace
+          .replace(/;\s*;/g, ';')
+          .replace(/^\s*;\s*/g, '')
+          .trim()
+          .replace(/;$/, '');
+        return stripped ? `style="${stripped}"` : '';
+      })
+      // 2. Collapse <span> tags that now have no attributes at all
+      .replace(/<span>\s*(.*?)\s*<\/span>/gi, '$1')
+      // 3. Remove empty style attributes left over
+      .replace(/\s+style=""\s*/gi, ' ')
+      // 4. Collapse multiple spaces inside tags
+      .replace(/ {2,}/g, ' ');
+
+    return cleaned;
   }
 }
 
