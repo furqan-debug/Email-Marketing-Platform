@@ -192,6 +192,7 @@ export class WebhooksService {
     body?: string;
     text?: string;
     html?: string;
+    receivedAt?: Date | string;
   }): Promise<{ status: string; matchedCount: number; contactEmail: string }> {
     const rawFrom = payload.from || '';
     const emailMatch = rawFrom.match(/<([^>]+)>/) || [null, rawFrom];
@@ -201,7 +202,9 @@ export class WebhooksService {
       throw new Error(`Invalid sender email address: "${rawFrom}"`);
     }
 
-    this.logger.log(`Processing inbound reply from: ${senderEmail} (Subject: "${payload.subject || ''}")`);
+    const replyDate = payload.receivedAt ? new Date(payload.receivedAt) : new Date();
+
+    this.logger.log(`Processing inbound reply from: ${senderEmail} (Subject: "${payload.subject || ''}", Date: ${replyDate.toISOString()})`);
 
     // Find contact by email across all audiences
     const contacts = await this.prisma.contact.findMany({
@@ -216,70 +219,100 @@ export class WebhooksService {
 
     const contactIds = contacts.map(c => c.id);
 
-    // 1. Find recent sent messages for this contact (matches single broadcasts AND sequence steps)
+    // 1. Find sent messages for this contact that were sent BEFORE or AT the reply time (with 2 min clock skew tolerance)
+    const maxSendTime = new Date(replyDate.getTime() + 120000);
     const messagesWhere: any = {
       contactId: { in: contactIds },
+      enqueuedAt: { not: null, lte: maxSendTime },
     };
     if (payload.campaignId) {
       messagesWhere.campaignId = payload.campaignId;
     }
 
-    const recentMessages = await this.prisma.message.findMany({
+    const eligibleMessages = await this.prisma.message.findMany({
       where: messagesWhere,
+      orderBy: { enqueuedAt: 'desc' },
+      include: {
+        campaign: { select: { id: true, name: true, subject: true } },
+      },
       take: 20,
     });
 
-    if (recentMessages.length === 0) {
-      this.logger.log(`No sent messages found for contact ${senderEmail}`);
+    if (eligibleMessages.length === 0) {
+      this.logger.log(`No eligible prior messages found for contact ${senderEmail} sent before ${replyDate.toISOString()}`);
       return { status: 'no_messages_found', matchedCount: 0, contactEmail: senderEmail };
     }
 
-    // Identify target campaigns
-    const campaignIds = Array.from(new Set(recentMessages.map(m => m.campaignId)));
+    // Match the specific message / campaign:
+    // 1. Match by Message-ID / inReplyTo / references
+    // 2. Match by Subject line similarity
+    // 3. Fallback: match the SINGLE most recently sent message before replyDate
+    let matchedMessage = eligibleMessages[0];
 
-    // Create Event(type: 'Reply') for the most recent message per campaign
-    const seenCampaigns = new Set<string>();
-    let createdEvents = 0;
+    // Try inReplyTo / references
+    const inReplyToClean = (payload.inReplyTo || '').replace(/[<>]/g, '').trim().toLowerCase();
+    const referencesClean = (payload.references || '').replace(/[<>]/g, '').trim().toLowerCase();
 
-    for (const msg of recentMessages) {
-      if (seenCampaigns.has(msg.campaignId)) continue;
-      seenCampaigns.add(msg.campaignId);
-
-      // Check if a Reply event was already recorded for this message in last 60 seconds
-      const existingReply = await this.prisma.event.findFirst({
-        where: {
-          messageId: msg.id,
-          type: 'Reply',
-          occurredAt: { gte: new Date(Date.now() - 60000) },
-        },
+    if (inReplyToClean || referencesClean) {
+      const idMatch = eligibleMessages.find(m => {
+        const mId = m.id.toLowerCase();
+        return (inReplyToClean && inReplyToClean.includes(mId)) || (referencesClean && referencesClean.includes(mId));
       });
-
-      if (!existingReply) {
-        await this.prisma.event.create({
-          data: {
-            type: 'Reply',
-            messageId: msg.id,
-            rawPayload: {
-              from: senderEmail,
-              to: payload.to,
-              subject: payload.subject,
-              inReplyTo: payload.inReplyTo,
-              references: payload.references,
-              snippet: (payload.body || payload.text || '').slice(0, 500),
-              receivedAt: new Date().toISOString(),
-            },
-            occurredAt: new Date(),
-          },
-        });
-        createdEvents++;
+      if (idMatch) {
+        matchedMessage = idMatch;
       }
     }
 
-    // 2. Halt any multi-step follow-up sequences for this contact
+    // Try subject matching
+    const normalizeSubj = (s: string) => s.replace(/^(re|fwd|fw|external):\s*/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+    const replySubjNorm = normalizeSubj(payload.subject || '');
+
+    if (replySubjNorm) {
+      const subjMatch = eligibleMessages.find(m => {
+        const cSubjNorm = normalizeSubj(m.campaign.subject || m.campaign.name || '');
+        return cSubjNorm && (replySubjNorm.includes(cSubjNorm) || cSubjNorm.includes(replySubjNorm));
+      });
+      if (subjMatch) {
+        matchedMessage = subjMatch;
+      }
+    }
+
+    const matchedCampaignId = matchedMessage.campaignId;
+
+    // Check if a Reply event was already recorded for this message
+    const existingReply = await this.prisma.event.findFirst({
+      where: {
+        messageId: matchedMessage.id,
+        type: 'Reply',
+      },
+    });
+
+    let createdEvents = 0;
+    if (!existingReply) {
+      await this.prisma.event.create({
+        data: {
+          type: 'Reply',
+          messageId: matchedMessage.id,
+          rawPayload: {
+            from: senderEmail,
+            to: payload.to,
+            subject: payload.subject,
+            inReplyTo: payload.inReplyTo,
+            references: payload.references,
+            snippet: (payload.body || payload.text || '').slice(0, 500),
+            receivedAt: replyDate.toISOString(),
+          },
+          occurredAt: replyDate,
+        },
+      });
+      createdEvents++;
+    }
+
+    // Halt ONLY the matched campaign's follow-up sequence for this contact
     await this.prisma.campaignLead.updateMany({
       where: {
         contactId: { in: contactIds },
-        campaignId: { in: campaignIds },
+        campaignId: matchedCampaignId,
       },
       data: {
         status: 'REPLIED',
@@ -287,17 +320,14 @@ export class WebhooksService {
       },
     });
 
-    // 3. Immediately recompute analytics for all affected campaigns
-    for (const cId of campaignIds) {
-      try {
-        await this.analyticsService.computeForCampaign(cId as string);
-      } catch (aErr: any) {
-        this.logger.warn(`Failed to auto-recompute analytics for ${cId}: ${aErr?.message}`);
-      }
+    // Recompute analytics for the matched campaign
+    try {
+      await this.analyticsService.computeForCampaign(matchedCampaignId);
+    } catch (aErr: any) {
+      this.logger.warn(`Failed to auto-recompute analytics for ${matchedCampaignId}: ${aErr?.message}`);
     }
 
-
-    this.logger.log(`Successfully logged Reply for ${senderEmail} across ${seenCampaigns.size} campaign(s)`);
+    this.logger.log(`Successfully matched Reply from ${senderEmail} to campaign ${matchedCampaignId}`);
     return {
       status: 'ok',
       matchedCount: createdEvents,

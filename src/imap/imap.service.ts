@@ -220,6 +220,8 @@ export class ImapService {
           if (!bodyText) bodyText = `[Reply from ${fromEmail}: ${subject}]`;
 
 
+          const emailDate = message.internalDate ? new Date(message.internalDate) : (env.date ? new Date(env.date) : new Date());
+
           // Process inbound email through our universal reply processor
           try {
             const result = await this.webhooksService.handleInboundReply({
@@ -229,6 +231,7 @@ export class ImapService {
               inReplyTo,
               references: messageId,
               body: bodyText,
+              receivedAt: emailDate,
             });
 
             if (result.status === 'ok' && result.matchedCount > 0) {
@@ -246,18 +249,18 @@ export class ImapService {
                   const contact = contacts[0];
                   const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || fromName || undefined;
 
-                  // Find recent messages for this contact to get campaignId
+                  // Find message sent before or at emailDate
                   const recentMsg = await this.prisma.message.findFirst({
-                    where: { contactId: contact.id },
+                    where: {
+                      contactId: contact.id,
+                      enqueuedAt: { not: null, lte: new Date(emailDate.getTime() + 120000) },
+                    },
                     orderBy: { enqueuedAt: 'desc' },
                     select: { campaignId: true },
                   });
 
                   if (recentMsg) {
-                    const emailDate = message.internalDate ? new Date(message.internalDate) : (env.date ? new Date(env.date) : new Date());
-
                     await this.inboxService.createOrUpdateThread({
-
                       campaignId: recentMsg.campaignId,
                       contactId: contact.id,
                       contactEmail: fromEmail,
@@ -269,7 +272,6 @@ export class ImapService {
                       sentAt: emailDate,
                     });
                   }
-
                 }
               } catch (inboxErr: any) {
                 this.logger.warn('[IMAP Sync] Failed to create inbox thread: ' + inboxErr?.message);

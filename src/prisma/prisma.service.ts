@@ -202,6 +202,62 @@ export class PrismaService implements OnModuleInit, OnModuleDestroy {
     } catch (backfillErr: any) {
       console.warn('Campaign backfill notice in onModuleInit:', backfillErr?.message);
     }
+
+    // Clean up false positive replies where email occurred before the message was enqueued
+    try {
+      await this.pool.query(`
+        -- Delete false Reply events that predate the actual campaign message dispatch
+        DELETE FROM "Event"
+        WHERE id IN (
+          SELECT e.id
+          FROM "Event" e
+          JOIN "Message" m ON m.id = e."messageId"
+          WHERE e."type" = 'Reply'
+            AND m."enqueuedAt" IS NOT NULL
+            AND e."occurredAt" < (m."enqueuedAt" - INTERVAL '2 minutes')
+        );
+
+        -- Fix false REPLIED CampaignLead statuses
+        UPDATE "CampaignLead" l
+        SET "status" = CASE
+          WHEN l."currentStep" >= COALESCE((SELECT COUNT(*) FROM "CampaignStep" s WHERE s."campaignId" = l."campaignId"), 1)
+            THEN 'COMPLETED'
+          ELSE 'ACTIVE'
+        END
+        WHERE l."status" = 'REPLIED'
+          AND NOT EXISTS (
+            SELECT 1 FROM "Message" m
+            JOIN "Event" e ON e."messageId" = m.id AND e."type" = 'Reply'
+            WHERE m."campaignId" = l."campaignId"
+              AND m."contactId" = l."contactId"
+              AND (m."enqueuedAt" IS NULL OR e."occurredAt" >= (m."enqueuedAt" - INTERVAL '2 minutes'))
+          );
+
+        -- Recompute snapshots for campaigns whose reply count was corrupted
+        UPDATE "AnalyticsSnapshot" s
+        SET "replied" = sub.reply_count
+        FROM (
+          SELECT m."campaignId", COUNT(DISTINCT m."contactId") as reply_count
+          FROM "Message" m
+          JOIN "Event" e ON e."messageId" = m.id AND e."type" = 'Reply'
+          WHERE (m."enqueuedAt" IS NULL OR e."occurredAt" >= (m."enqueuedAt" - INTERVAL '2 minutes'))
+          GROUP BY m."campaignId"
+        ) sub
+        WHERE s."campaignId" = sub."campaignId";
+
+        -- Zero out replied count for campaigns with 0 valid replies
+        UPDATE "AnalyticsSnapshot" s
+        SET "replied" = 0
+        WHERE NOT EXISTS (
+          SELECT 1 FROM "Message" m
+          JOIN "Event" e ON e."messageId" = m.id AND e."type" = 'Reply'
+          WHERE m."campaignId" = s."campaignId"
+            AND (m."enqueuedAt" IS NULL OR e."occurredAt" >= (m."enqueuedAt" - INTERVAL '2 minutes'))
+        );
+      `);
+    } catch (cleanupErr: any) {
+      console.warn('Reply cleanup notice in onModuleInit:', cleanupErr?.message);
+    }
   }
 
 
