@@ -116,6 +116,7 @@ export class TrackingController {
   @Get('unsub/:token')
   async unsubscribe(
     @Param('token') token: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     const okHtml = `<!DOCTYPE html>
@@ -156,6 +157,15 @@ h1{font-size:1.4rem;color:#333;}p{color:#666;}</style>
         fullMessage.workspaceId,
         fullMessage.email,
       );
+
+      // Record Unsubscribe Event
+      const ip = this.extractIp(req);
+      const country = this.trackingService.geoCountry(ip);
+      await this.trackingService.recordUnsubscribe(message.id, {
+        country,
+        method: 'Unsubscribe Link',
+      });
+
       this.logger.log(`Unsubscribed ${fullMessage.email} from workspace ${fullMessage.workspaceId} via token`);
     } catch (err: any) {
       this.logger.error(`Unsubscribe error: ${err?.message ?? err}`);
@@ -173,6 +183,7 @@ h1{font-size:1.4rem;color:#333;}p{color:#666;}</style>
   @Post('unsub/:token')
   async unsubscribeOneClick(
     @Param('token') token: string,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
     try {
@@ -184,6 +195,15 @@ h1{font-size:1.4rem;color:#333;}p{color:#666;}</style>
             fullMessage.workspaceId,
             fullMessage.email,
           );
+
+          // Record Unsubscribe Event
+          const ip = this.extractIp(req);
+          const country = this.trackingService.geoCountry(ip);
+          await this.trackingService.recordUnsubscribe(message.id, {
+            country,
+            method: 'One-Click Header',
+          });
+
           this.logger.log(
             `[OneClick] Unsubscribed ${fullMessage.email} from workspace ${fullMessage.workspaceId}`,
           );

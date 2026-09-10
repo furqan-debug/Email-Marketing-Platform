@@ -69,13 +69,15 @@ export class TrackingService {
    */
   async getMessageWithWorkspace(
     messageId: string,
-  ): Promise<{ email: string; workspaceId: string } | null> {
+  ): Promise<{ email: string; workspaceId: string; contactId: string; campaignId: string } | null> {
     try {
       const message = await this.prisma.message.findUnique({
         where: { id: messageId },
         include: {
+          campaign: { select: { id: true } },
           contact: {
             select: {
+              id: true,
               email: true,
               audience: { select: { workspaceId: true } },
             },
@@ -86,6 +88,8 @@ export class TrackingService {
       return {
         email:       message.contact.email,
         workspaceId: message.contact.audience.workspaceId,
+        contactId:   message.contact.id,
+        campaignId:  message.campaignId,
       };
     } catch {
       return null;
@@ -165,6 +169,29 @@ export class TrackingService {
       },
     });
     this.logger.log(`Recorded Event(type=${type}) for messageId=${messageId} country=${meta.country ?? 'unknown'}`);
+  }
+
+  /**
+   * Create an Unsubscribe Event row for the given message.
+   */
+  async recordUnsubscribe(
+    messageId: string,
+    meta: { country?: string | null; method?: string },
+  ): Promise<void> {
+    try {
+      await this.prisma.event.create({
+        data: {
+          type: 'Unsubscribe',
+          messageId,
+          rawPayload: { method: meta.method || 'Unsubscribe Link' },
+          country: meta.country ?? undefined,
+          occurredAt: new Date(),
+        },
+      });
+      this.logger.log(`Recorded Event(type=Unsubscribe) for messageId=${messageId}`);
+    } catch (err: any) {
+      this.logger.warn(`Failed to record unsubscribe event: ${err?.message}`);
+    }
   }
 
 

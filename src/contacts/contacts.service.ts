@@ -261,6 +261,98 @@ export class ContactsService {
     };
   }
 
+  /**
+   * List all unsubscribed contacts across campaigns with campaign, audience, and contact details.
+   */
+  async getUnsubscribers(options?: {
+    workspaceId?: string;
+    campaignId?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: any[]; total: number; page: number; limit: number; pages: number }> {
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options?.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const eventWhere: any = {
+      type: 'Unsubscribe',
+    };
+    if (options?.campaignId) {
+      eventWhere.message = { campaignId: options.campaignId };
+    }
+    if (options?.workspaceId) {
+      eventWhere.message = {
+        ...(eventWhere.message || {}),
+        campaign: { audience: { workspaceId: options.workspaceId } },
+      };
+    }
+    if (options?.search && options.search.trim()) {
+      const s = options.search.trim().toLowerCase();
+      eventWhere.OR = [
+        { message: { contact: { email: { contains: s, mode: 'insensitive' } } } },
+        { message: { contact: { firstName: { contains: s, mode: 'insensitive' } } } },
+        { message: { contact: { lastName: { contains: s, mode: 'insensitive' } } } },
+        { message: { campaign: { name: { contains: s, mode: 'insensitive' } } } },
+      ];
+    }
+
+    const [total, events] = await Promise.all([
+      this.prisma.event.count({ where: eventWhere }),
+      this.prisma.event.findMany({
+        where: eventWhere,
+        orderBy: { occurredAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          message: {
+            include: {
+              campaign: { select: { id: true, name: true, subject: true } },
+              contact: {
+                select: {
+                  id: true,
+                  email: true,
+                  firstName: true,
+                  lastName: true,
+                  audience: {
+                    select: {
+                      id: true,
+                      name: true,
+                      workspaceId: true,
+                      workspace: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const data = events.map((e) => ({
+      id: e.id,
+      email: e.message.contact.email,
+      name: [e.message.contact.firstName, e.message.contact.lastName].filter(Boolean).join(' ') || null,
+      campaignId: e.message.campaign.id,
+      campaignName: e.message.campaign.name,
+      audienceName: e.message.contact.audience?.name || null,
+      workspaceId: e.message.contact.audience?.workspaceId || null,
+      workspaceName: e.message.contact.audience?.workspace?.name || null,
+      country: e.country || null,
+      unsubscribedAt: e.occurredAt,
+      method: (e.rawPayload as any)?.method || 'Unsubscribe Link',
+    }));
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit) || 1,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------

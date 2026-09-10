@@ -138,6 +138,28 @@ export class ContactsController {
   }
 
   /**
+   * GET /contacts/unsubscribers
+   * Query: workspaceId?, campaignId?, search?, page?, limit?
+   * Lists all unsubscribed contacts across campaigns with full context.
+   */
+  @Get('unsubscribers')
+  async getUnsubscribers(
+    @Query('workspaceId') workspaceId?: string,
+    @Query('campaignId') campaignId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.contactsService.getUnsubscribers({
+      workspaceId,
+      campaignId,
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  /**
    * POST /contacts/suppress
    * Body: { workspaceId, email }
    * Adds the email to the workspace suppression list.
