@@ -215,6 +215,52 @@ export class ContactsService {
     return row !== null;
   }
 
+  /**
+   * List suppressions with search, workspace filter, and pagination.
+   */
+  async getSuppressions(options?: {
+    workspaceId?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<{ data: any[]; total: number; page: number; limit: number; pages: number }> {
+    const page = Math.max(1, Number(options?.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(options?.limit) || 50));
+    const skip = (page - 1) * limit;
+
+    const where: any = {};
+    if (options?.workspaceId) {
+      where.workspaceId = options.workspaceId;
+    }
+    if (options?.search && options.search.trim()) {
+      where.email = {
+        contains: options.search.trim().toLowerCase(),
+        mode: 'insensitive',
+      };
+    }
+
+    const [total, data] = await Promise.all([
+      this.prisma.suppression.count({ where }),
+      this.prisma.suppression.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          workspace: { select: { id: true, name: true } },
+        },
+      }),
+    ]);
+
+    return {
+      data,
+      total,
+      page,
+      limit,
+      pages: Math.ceil(total / limit) || 1,
+    };
+  }
+
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------

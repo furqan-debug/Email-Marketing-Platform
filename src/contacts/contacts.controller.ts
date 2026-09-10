@@ -118,6 +118,26 @@ export class ContactsController {
   }
 
   /**
+   * GET /contacts/suppressions
+   * Query: workspaceId?, search?, page?, limit?
+   * Lists suppressions with search, workspace filtering, and pagination.
+   */
+  @Get('suppressions')
+  async getSuppressions(
+    @Query('workspaceId') workspaceId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.contactsService.getSuppressions({
+      workspaceId,
+      search,
+      page: page ? parseInt(page, 10) : undefined,
+      limit: limit ? parseInt(limit, 10) : undefined,
+    });
+  }
+
+  /**
    * POST /contacts/suppress
    * Body: { workspaceId, email }
    * Adds the email to the workspace suppression list.
