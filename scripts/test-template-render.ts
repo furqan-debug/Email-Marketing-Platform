@@ -2,7 +2,7 @@ import { TemplateService } from '../src/templates/template.service';
 import type { ContactModel, TemplateModel } from '../prisma/generated/client/models';
 
 async function run() {
-  console.log('🧪 Testing TemplateService.render()...\n');
+  console.log('Testing TemplateService.render()...\n');
 
   // Instantiate the service manually (prisma is not used during render)
   const templateService = new TemplateService(null as any);
@@ -56,14 +56,14 @@ async function run() {
     renderedHtml.includes('with ALICE@EXAMPLE.COM.') &&
     renderedHtml.includes('have you, Alice.')
   ) {
-    console.log('✅ Success! Variable substitution works exactly as expected.');
+    console.log('Success! Variable substitution works exactly as expected.');
   } else {
-    console.error('❌ Render failure: placeholder mismatch.');
+    console.error('Render failure: placeholder mismatch.');
     process.exit(1);
   }
 }
 
 run().catch((err) => {
-  console.error('❌ Script failed:', err);
+  console.error('Script failed:', err);
   process.exit(1);
 });
