@@ -117,6 +117,7 @@ export class SesEmailProvider implements EmailProvider {
 
     const response = await this.client.send(
       new SendRawEmailCommand({
+        ConfigurationSetName: configurationSet || undefined,
         RawMessage: { Data: Buffer.from(rawMessage, 'utf-8') },
       }),
     );
