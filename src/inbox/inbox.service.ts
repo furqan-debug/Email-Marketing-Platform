@@ -1,10 +1,10 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { SESClient, SendEmailCommand } from '@aws-sdk/client-ses';
 import { cleanEmailBody } from './email-cleaner';
 
 @Injectable()
-export class InboxService {
+export class InboxService implements OnModuleInit {
   private readonly logger = new Logger(InboxService.name);
   private readonly sesClient: SESClient;
 
@@ -19,6 +19,12 @@ export class InboxService {
             }
           : undefined,
     });
+  }
+
+  async onModuleInit() {
+    await this.realignMismatchedMessages().catch(err =>
+      this.logger.warn('Initial realign notice: ' + err?.message)
+    );
   }
 
   async createOrUpdateThread(params: {
@@ -290,5 +296,119 @@ export class InboxService {
       this.prisma.inboxThread.count({ where: { status: 'archived' } }),
     ]);
     return { total, unread, replied, archived };
+  }
+
+  /**
+   * Auto-realign any inbox messages that were incorrectly merged into the wrong campaign thread.
+   * Compares each inbound message's subject against the thread's campaign and other campaigns sent to that contact.
+   */
+  async realignMismatchedMessages(): Promise<{ realigned: number }> {
+    let realigned = 0;
+    try {
+      const threads = await this.prisma.inboxThread.findMany({
+        include: {
+          campaign: { select: { id: true, name: true, subject: true } },
+          contact: {
+            select: {
+              id: true,
+              email: true,
+              firstName: true,
+              lastName: true,
+              messages: {
+                select: {
+                  campaignId: true,
+                  campaign: { select: { id: true, name: true, subject: true } },
+                },
+              },
+            },
+          },
+          messages: {
+            where: { direction: 'inbound' },
+            select: { id: true, subject: true, body: true, sentAt: true, fromEmail: true, toEmail: true },
+          },
+        },
+      });
+
+      const normalizeSubj = (s: string) =>
+        s.replace(/^(re|fwd|fw|external):\s*/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
+
+      for (const thread of threads) {
+        if (!thread.contact || !thread.contact.messages) continue;
+
+        const currentCampSubj = normalizeSubj(thread.campaign?.subject || thread.campaign?.name || '');
+        const campaignMap = new Map<string, { id: string; name?: string; subject?: string | null }>();
+        for (const m of thread.contact.messages) {
+          if (m.campaignId && m.campaign) {
+            campaignMap.set(m.campaignId, m.campaign);
+          }
+        }
+        const contactCampaigns = Array.from(campaignMap.values());
+
+        if (contactCampaigns.length <= 1) continue; // Only 1 campaign sent to this contact
+
+        for (const msg of thread.messages) {
+          if (!msg.subject) continue;
+          const msgSubjNorm = normalizeSubj(msg.subject);
+          if (!msgSubjNorm) continue;
+
+          // If message subject matches current thread campaign, keep it here
+          const matchesCurrent = currentCampSubj && (msgSubjNorm === currentCampSubj || msgSubjNorm.includes(currentCampSubj));
+          if (matchesCurrent) continue;
+
+          // Find if it matches another campaign sent to this contact
+          const otherCampaign = contactCampaigns.find(c => {
+            if (c.id === thread.campaignId) return false;
+            const cNorm = normalizeSubj(c.subject || c.name || '');
+            return cNorm && cNorm.length >= 3 && (msgSubjNorm === cNorm || msgSubjNorm.includes(cNorm) || cNorm.includes(msgSubjNorm));
+          });
+
+          if (otherCampaign) {
+            const targetThread = await this.prisma.inboxThread.upsert({
+              where: {
+                campaignId_contactId: {
+                  campaignId: otherCampaign.id,
+                  contactId: thread.contactId,
+                },
+              },
+              create: {
+                campaignId: otherCampaign.id,
+                contactId: thread.contactId,
+                contactEmail: thread.contactEmail,
+                contactName: thread.contactName,
+                subject: msg.subject,
+                status: 'unread',
+                createdAt: msg.sentAt,
+                updatedAt: msg.sentAt,
+              },
+              update: {
+                updatedAt: msg.sentAt,
+              },
+            });
+
+            await this.prisma.inboxMessage.update({
+              where: { id: msg.id },
+              data: { threadId: targetThread.id },
+            });
+
+            realigned++;
+            this.logger.log(`[Inbox Realign] Moved message "${msg.subject}" from campaign ${thread.campaignId} to campaign ${otherCampaign.id}`);
+          }
+        }
+      }
+
+      // Delete any orphaned threads that now have 0 messages
+      const allThreads = await this.prisma.inboxThread.findMany({
+        include: { _count: { select: { messages: true } } },
+      });
+      const emptyThreads = allThreads.filter(t => t._count.messages === 0);
+      if (emptyThreads.length > 0) {
+        await this.prisma.inboxThread.deleteMany({
+          where: { id: { in: emptyThreads.map(t => t.id) } },
+        });
+      }
+    } catch (err: any) {
+      this.logger.warn(`[Inbox Realign] Notice: ${err?.message}`);
+    }
+    return { realigned };
   }
 }

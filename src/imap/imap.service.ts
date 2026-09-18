@@ -135,6 +135,13 @@ export class ImapService {
         }
       }
 
+      // Auto-realign any historical messages across campaigns
+      try {
+        await this.inboxService.realignMismatchedMessages();
+      } catch (rErr: any) {
+        this.logger.warn('Failed to realign inbox messages: ' + rErr?.message);
+      }
+
       this.lastSyncedAt = new Date();
       this.lastSyncSummary = {
         status: 'ok',
@@ -234,47 +241,29 @@ export class ImapService {
               receivedAt: emailDate,
             });
 
-            if (result.status === 'ok' && result.matchedCount > 0) {
-              matched += result.matchedCount;
-              this.logger.log('[IMAP Sync] Logged reply from ' + fromEmail + ' (Subject: "' + subject + '")');
+            if (result.status === 'ok') {
+              if (result.matchedCount > 0) {
+                matched += result.matchedCount;
+                this.logger.log('[IMAP Sync] Logged reply from ' + fromEmail + ' (Subject: "' + subject + '")');
+              }
 
-              // Find the contact and campaign to build an inbox thread
-              try {
-                const contacts = await this.prisma.contact.findMany({
-                  where: { email: { equals: fromEmail, mode: 'insensitive' } },
-                  select: { id: true, firstName: true, lastName: true },
-                });
-
-                if (contacts.length > 0) {
-                  const contact = contacts[0];
-                  const contactName = [contact.firstName, contact.lastName].filter(Boolean).join(' ') || fromName || undefined;
-
-                  // Find message sent before or at emailDate
-                  const recentMsg = await this.prisma.message.findFirst({
-                    where: {
-                      contactId: contact.id,
-                      enqueuedAt: { not: null, lte: new Date(emailDate.getTime() + 120000) },
-                    },
-                    orderBy: { enqueuedAt: 'desc' },
-                    select: { campaignId: true },
+              // Ensure inbox thread is created/updated for the EXACT matched campaign
+              if (result.campaignId && result.contactId) {
+                try {
+                  await this.inboxService.createOrUpdateThread({
+                    campaignId: result.campaignId,
+                    contactId: result.contactId,
+                    contactEmail: fromEmail,
+                    contactName: result.contactName || fromName || undefined,
+                    subject,
+                    body: bodyText,
+                    fromEmail,
+                    toEmail,
+                    sentAt: emailDate,
                   });
-
-                  if (recentMsg) {
-                    await this.inboxService.createOrUpdateThread({
-                      campaignId: recentMsg.campaignId,
-                      contactId: contact.id,
-                      contactEmail: fromEmail,
-                      contactName,
-                      subject,
-                      body: bodyText,
-                      fromEmail,
-                      toEmail,
-                      sentAt: emailDate,
-                    });
-                  }
+                } catch (inboxErr: any) {
+                  this.logger.warn('[IMAP Sync] Failed to create inbox thread: ' + inboxErr?.message);
                 }
-              } catch (inboxErr: any) {
-                this.logger.warn('[IMAP Sync] Failed to create inbox thread: ' + inboxErr?.message);
               }
             }
           } catch (replyErr: any) {

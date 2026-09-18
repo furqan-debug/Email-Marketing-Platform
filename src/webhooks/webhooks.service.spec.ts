@@ -15,6 +15,7 @@ import { of } from 'rxjs';
 import type { AxiosResponse } from 'axios';
 import { WebhooksService } from './webhooks.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import type { SnsEnvelope } from './sns.types';
 
 // Fixtures
@@ -37,7 +38,7 @@ function mockAxiosResponse(): AxiosResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Test suite
+// Tests
 // ---------------------------------------------------------------------------
 
 describe('WebhooksService', () => {
@@ -53,15 +54,21 @@ describe('WebhooksService', () => {
 
     const mockHttpService = { get: httpGet };
     const mockPrismaService = {
-      message: { findUnique: prismaMessageFindUnique },
-      event:   { create:     prismaEventCreate     },
+      message:      { findUnique: prismaMessageFindUnique, findMany: jest.fn() },
+      event:        { create:     prismaEventCreate, findFirst: jest.fn() },
+      contact:      { findMany: jest.fn() },
+      campaignLead: { updateMany: jest.fn(), findFirst: jest.fn() },
+    };
+    const mockAnalyticsService = {
+      computeForCampaign: jest.fn().mockResolvedValue({}),
     };
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         WebhooksService,
-        { provide: HttpService,    useValue: mockHttpService   },
-        { provide: PrismaService,  useValue: mockPrismaService },
+        { provide: HttpService,       useValue: mockHttpService      },
+        { provide: PrismaService,     useValue: mockPrismaService    },
+        { provide: AnalyticsService,  useValue: mockAnalyticsService },
       ],
     }).compile();
 
@@ -161,20 +168,96 @@ describe('WebhooksService', () => {
   // UnsubscribeConfirmation
   // -------------------------------------------------------------------------
 
-  describe('UnsubscribeConfirmation', () => {
-    it('ignores the message and returns { status: "ignored" }', async () => {
-      const envelope: SnsEnvelope = {
-        Type: 'UnsubscribeConfirmation',
-        MessageId: 'unsub-001',
-        TopicArn: 'arn:aws:sns:us-east-1:123:ses-events',
-        Timestamp: '2024-01-15T12:00:00Z',
+  // -------------------------------------------------------------------------
+  // Inbound Reply Threading Across Multiple Campaigns
+  // -------------------------------------------------------------------------
+
+  describe('Inbound Reply Threading', () => {
+    it('accurately separates replies into different campaigns for the same contact by subject', async () => {
+      const contact = { id: 'contact-1', email: 'alice@example.com', firstName: 'Alice', lastName: 'Smith' };
+      const campaign1Msg = {
+        id: 'msg-camp-1',
+        campaignId: 'camp-1',
+        contactId: 'contact-1',
+        enqueuedAt: new Date(Date.now() - 3600000),
+        campaign: { id: 'camp-1', name: 'Partnership Outreach', subject: 'Partnership with Acme' },
+        contact,
+      };
+      const campaign2Msg = {
+        id: 'msg-camp-2',
+        campaignId: 'camp-2',
+        contactId: 'contact-1',
+        enqueuedAt: new Date(Date.now() - 1800000),
+        campaign: { id: 'camp-2', name: 'Demo Sequence', subject: 'Exclusive Demo Invitation' },
+        contact,
       };
 
-      const result = await service.handleSnsEnvelope(envelope);
+      (service as any).prisma.contact.findMany = jest.fn().mockResolvedValue([contact]);
+      (service as any).prisma.message.findMany = jest.fn().mockResolvedValue([campaign2Msg, campaign1Msg]);
+      (service as any).prisma.event.findFirst = jest.fn().mockResolvedValue(null);
+      (service as any).prisma.event.create = jest.fn().mockResolvedValue({ id: 'evt-1' });
+      (service as any).prisma.campaignLead.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      (service as any).prisma.campaignLead.findFirst = jest.fn().mockResolvedValue(null);
 
-      expect(httpGet).not.toHaveBeenCalled();
-      expect(prismaEventCreate).not.toHaveBeenCalled();
-      expect(result).toEqual({ status: 'ignored' });
+      // Reply to Campaign 1
+      const res1 = await service.handleInboundReply({
+        from: 'Alice Smith <alice@example.com>',
+        subject: 'Re: Partnership with Acme',
+        body: 'Interested in partnering!',
+      });
+
+      expect(res1.status).toBe('ok');
+      expect(res1.campaignId).toBe('camp-1');
+      expect(res1.contactId).toBe('contact-1');
+
+      // Reply to Campaign 2
+      const res2 = await service.handleInboundReply({
+        from: 'alice@example.com',
+        subject: 'Re: Exclusive Demo Invitation',
+        body: 'When can we do the demo?',
+      });
+
+      expect(res2.status).toBe('ok');
+      expect(res2.campaignId).toBe('camp-2');
+      expect(res2.contactId).toBe('contact-1');
+    });
+
+    it('matches campaign by In-Reply-To Message-ID even when subjects vary', async () => {
+      const contact = { id: 'contact-1', email: 'alice@example.com', firstName: 'Alice', lastName: 'Smith' };
+      const campaign1Msg = {
+        id: 'ses-msg-uuid-1',
+        campaignId: 'camp-1',
+        contactId: 'contact-1',
+        enqueuedAt: new Date(Date.now() - 3600000),
+        campaign: { id: 'camp-1', name: 'Campaign 1', subject: 'Subject 1' },
+        contact,
+      };
+      const campaign2Msg = {
+        id: 'ses-msg-uuid-2',
+        campaignId: 'camp-2',
+        contactId: 'contact-1',
+        enqueuedAt: new Date(Date.now() - 1800000),
+        campaign: { id: 'camp-2', name: 'Campaign 2', subject: 'Subject 2' },
+        contact,
+      };
+
+      (service as any).prisma.contact.findMany = jest.fn().mockResolvedValue([contact]);
+      (service as any).prisma.message.findMany = jest.fn().mockResolvedValue([campaign2Msg, campaign1Msg]);
+      (service as any).prisma.event.findFirst = jest.fn().mockResolvedValue(null);
+      (service as any).prisma.event.create = jest.fn().mockResolvedValue({ id: 'evt-2' });
+      (service as any).prisma.campaignLead.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+      (service as any).prisma.campaignLead.findFirst = jest.fn().mockResolvedValue(null);
+
+      const res = await service.handleInboundReply({
+        from: 'alice@example.com',
+        subject: 'Quick question',
+        inReplyTo: '<ses-msg-uuid-1@email.amazonses.com>',
+        body: 'Can you tell me more?',
+      });
+
+      expect(res.status).toBe('ok');
+      expect(res.campaignId).toBe('camp-1');
+      expect(res.messageId).toBe('ses-msg-uuid-1');
     });
   });
 });

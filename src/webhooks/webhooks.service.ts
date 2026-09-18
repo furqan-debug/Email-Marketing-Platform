@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, forwardRef } from '@nestjs/common';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalyticsService } from '../analytics/analytics.service';
+import { InboxService } from '../inbox/inbox.service';
 
 import type {
   SnsEnvelope,
@@ -18,6 +19,7 @@ export class WebhooksService {
     private readonly http: HttpService,
     private readonly prisma: PrismaService,
     private readonly analyticsService: AnalyticsService,
+    @Optional() @Inject(forwardRef(() => InboxService)) private readonly inboxService?: InboxService,
   ) {}
 
 
@@ -193,7 +195,15 @@ export class WebhooksService {
     text?: string;
     html?: string;
     receivedAt?: Date | string;
-  }): Promise<{ status: string; matchedCount: number; contactEmail: string }> {
+  }): Promise<{
+    status: string;
+    matchedCount: number;
+    contactEmail: string;
+    contactId?: string;
+    contactName?: string;
+    campaignId?: string;
+    messageId?: string;
+  }> {
     const rawFrom = payload.from || '';
     const emailMatch = rawFrom.match(/<([^>]+)>/) || [null, rawFrom];
     const senderEmail = (emailMatch[1] || rawFrom).trim().toLowerCase();
@@ -209,7 +219,7 @@ export class WebhooksService {
     // Find contact by email across all audiences
     const contacts = await this.prisma.contact.findMany({
       where: { email: { equals: senderEmail, mode: 'insensitive' } },
-      select: { id: true, audienceId: true },
+      select: { id: true, audienceId: true, firstName: true, lastName: true },
     });
 
     if (contacts.length === 0) {
@@ -234,8 +244,9 @@ export class WebhooksService {
       orderBy: { enqueuedAt: 'desc' },
       include: {
         campaign: { select: { id: true, name: true, subject: true } },
+        contact: { select: { id: true, email: true, firstName: true, lastName: true } },
       },
-      take: 20,
+      take: 50,
     });
 
     if (eligibleMessages.length === 0) {
@@ -244,10 +255,11 @@ export class WebhooksService {
     }
 
     // Match the specific message / campaign:
-    // 1. Match by Message-ID / inReplyTo / references
-    // 2. Match by Subject line similarity
+    // 1. Priority 1: Match by Message-ID / inReplyTo / references
+    // 2. Priority 2: Match by Subject line similarity
     // 3. Fallback: match the SINGLE most recently sent message before replyDate
     let matchedMessage = eligibleMessages[0];
+    let matchedById = false;
 
     // Try inReplyTo / references
     const inReplyToClean = (payload.inReplyTo || '').replace(/[<>]/g, '').trim().toLowerCase();
@@ -260,24 +272,63 @@ export class WebhooksService {
       });
       if (idMatch) {
         matchedMessage = idMatch;
+        matchedById = true;
+      } else {
+        // Also check if any CampaignLead rootMessageId matches
+        const leadWithRoot = await this.prisma.campaignLead.findFirst({
+          where: {
+            contactId: { in: contactIds },
+            rootMessageId: { not: null },
+          },
+        });
+        if (leadWithRoot?.rootMessageId) {
+          const rootClean = leadWithRoot.rootMessageId.toLowerCase().replace(/[<>]/g, '').trim();
+          if ((inReplyToClean && inReplyToClean.includes(rootClean)) || (referencesClean && referencesClean.includes(rootClean))) {
+            const msgForLead = eligibleMessages.find(m => m.campaignId === leadWithRoot.campaignId);
+            if (msgForLead) {
+              matchedMessage = msgForLead;
+              matchedById = true;
+            }
+          }
+        }
       }
     }
 
-    // Try subject matching
+    // Try subject matching (only if NOT already matched by Message-ID)
     const normalizeSubj = (s: string) => s.replace(/^(re|fwd|fw|external):\s*/gi, '').replace(/[^a-z0-9]/gi, '').toLowerCase();
     const replySubjNorm = normalizeSubj(payload.subject || '');
 
-    if (replySubjNorm) {
-      const subjMatch = eligibleMessages.find(m => {
+    if (!matchedById && replySubjNorm) {
+      // 1. Exact normalized subject match
+      const exactMatch = eligibleMessages.find(m => {
         const cSubjNorm = normalizeSubj(m.campaign.subject || m.campaign.name || '');
-        return cSubjNorm && (replySubjNorm.includes(cSubjNorm) || cSubjNorm.includes(replySubjNorm));
+        return cSubjNorm && cSubjNorm === replySubjNorm;
       });
-      if (subjMatch) {
-        matchedMessage = subjMatch;
+      if (exactMatch) {
+        matchedMessage = exactMatch;
+      } else {
+        // 2. Substring match: pick candidate with longest matching subject
+        const candidates = eligibleMessages.filter(m => {
+          const cSubjNorm = normalizeSubj(m.campaign.subject || m.campaign.name || '');
+          return cSubjNorm && cSubjNorm.length >= 3 && (replySubjNorm.includes(cSubjNorm) || cSubjNorm.includes(replySubjNorm));
+        });
+        if (candidates.length > 0) {
+          candidates.sort((a, b) => {
+            const lenA = normalizeSubj(a.campaign.subject || a.campaign.name || '').length;
+            const lenB = normalizeSubj(b.campaign.subject || b.campaign.name || '').length;
+            return lenB - lenA;
+          });
+          matchedMessage = candidates[0];
+        }
       }
     }
 
     const matchedCampaignId = matchedMessage.campaignId;
+    const matchedContactId = matchedMessage.contactId;
+    const matchedContact = matchedMessage.contact || contacts.find(c => c.id === matchedContactId);
+    const contactName = matchedContact
+      ? [matchedContact.firstName, matchedContact.lastName].filter(Boolean).join(' ') || undefined
+      : undefined;
 
     // Check if a Reply event was already recorded for this message
     const existingReply = await this.prisma.event.findFirst({
@@ -327,11 +378,34 @@ export class WebhooksService {
       this.logger.warn(`Failed to auto-recompute analytics for ${matchedCampaignId}: ${aErr?.message}`);
     }
 
+    // Ensure the reply is added to the inbox thread for this EXACT matched campaign
+    if (this.inboxService) {
+      try {
+        await this.inboxService.createOrUpdateThread({
+          campaignId: matchedCampaignId,
+          contactId: matchedContactId,
+          contactEmail: senderEmail,
+          contactName,
+          subject: payload.subject,
+          body: payload.body || payload.text || '',
+          fromEmail: senderEmail,
+          toEmail: payload.to || '',
+          sentAt: replyDate,
+        });
+      } catch (inboxErr: any) {
+        this.logger.warn(`Failed to update inbox thread: ${inboxErr?.message}`);
+      }
+    }
+
     this.logger.log(`Successfully matched Reply from ${senderEmail} to campaign ${matchedCampaignId}`);
     return {
       status: 'ok',
       matchedCount: createdEvents,
       contactEmail: senderEmail,
+      contactId: matchedContactId,
+      contactName,
+      campaignId: matchedCampaignId,
+      messageId: matchedMessage.id,
     };
   }
 }
